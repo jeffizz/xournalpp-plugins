@@ -422,7 +422,7 @@ function initUi()
 	end
 
 	if enableShortcuts then
-		app.registerUi({ ["menu"] = "Text Tool (w)", ["callback"] = "textTool", ["accelerator"] = "w" })
+		app.registerUi({ ["menu"] = "Text Tool (e)", ["callback"] = "textTool", ["accelerator"] = "e" })
 		app.registerUi({
 			["menu"] = "Pen Tool (a)",
 			["callback"] = "penTool",

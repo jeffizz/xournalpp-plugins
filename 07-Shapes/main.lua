@@ -569,6 +569,151 @@ function makeTableSquare()
 	handleTableAction("makeSquare")
 end
 
+-- ============================================================================
+-- Smart Wavy Toggle
+-- ============================================================================
+
+local function analyzeStroke(stroke)
+	if not stroke or not stroke.x or #stroke.x < 2 then
+		return "unknown"
+	end
+
+	local maxDist, furthestIdx = 0, 1
+	local totalLen = 0
+
+	for i = 2, #stroke.x do
+		local dx_step = stroke.x[i] - stroke.x[i - 1]
+		local dy_step = stroke.y[i] - stroke.y[i - 1]
+		totalLen = totalLen + math.sqrt(dx_step * dx_step + dy_step * dy_step)
+
+		local dx = stroke.x[i] - stroke.x[1]
+		local dy = stroke.y[i] - stroke.y[1]
+		local d = math.sqrt(dx * dx + dy * dy)
+		if d > maxDist then
+			maxDist = d
+			furthestIdx = i
+		end
+	end
+
+	if maxDist < 5 then
+		return "unknown"
+	end
+
+	local x1, y1 = stroke.x[1], stroke.y[1]
+	local x2, y2 = stroke.x[furthestIdx], stroke.y[furthestIdx]
+	local endX, endY = stroke.x[#stroke.x], stroke.y[#stroke.y]
+
+	local startEndDist = math.sqrt((endX - x1) ^ 2 + (endY - y1) ^ 2)
+	local isClosed = startEndDist < maxDist * 0.3
+
+	local maxDeviation = 0
+	for i = 1, #stroke.x do
+		local distToLine = math.abs((x2 - x1) * (y1 - stroke.y[i]) - (x1 - stroke.x[i]) * (y2 - y1)) / maxDist
+		if distToLine > maxDeviation then
+			maxDeviation = distToLine
+		end
+	end
+
+	if isClosed and maxDeviation > math.max(4.0, maxDist * 0.05) then
+		return "unknown"
+	end
+
+	if maxDeviation > maxDist * 0.20 then
+		return "unknown"
+	end
+
+	local lengthRatio = totalLen / maxDist
+
+	if lengthRatio > 1.15 then
+		if isClosed then
+			return "straight", x1, y1, x2, y2, maxDist
+		else
+			if startEndDist < 5 then
+				endX, endY = x2, y2
+			end
+			return "curved", x1, y1, endX, endY, startEndDist
+		end
+	elseif maxDeviation > math.max(3.0, maxDist * 0.05) then
+		return "curved", x1, y1, endX, endY, startEndDist
+	else
+		return "straight", x1, y1, x2, y2, maxDist
+	end
+end
+
+function toggleWavyLine()
+	local success, selectedStrokes = pcall(app.getStrokes, "selection")
+	if not success or type(selectedStrokes) ~= "table" or #selectedStrokes == 0 then
+		return
+	end
+
+	local newStrokes = {}
+	local refsToDelete = {}
+
+	for _, stroke in ipairs(selectedStrokes) do
+		local shapeType, sx, sy, ex, ey, dist = analyzeStroke(stroke)
+
+		if shapeType == "straight" then
+			local angle = math.atan2 and math.atan2(ey - sy, ex - sx) or math.atan(ey - sy, ex - sx)
+
+			local amplitude = 0.7 + (stroke.width or 2.0) * 0.2
+			local wavelength = 6
+			local steps = math.max(20, math.floor(dist / 0.4))
+
+			local nx, ny, np = {}, {}, {}
+			for i = 0, steps do
+				local t = (i / steps) * dist
+
+				local env = 1.0
+				if t < wavelength / 2 then
+					env = t / (wavelength / 2)
+				end
+				if dist - t < wavelength / 2 then
+					env = (dist - t) / (wavelength / 2)
+				end
+
+				local lx = t
+				local ly = amplitude * env * math.sin(t / wavelength * math.pi * 2)
+
+				table.insert(nx, sx + lx * math.cos(angle) - ly * math.sin(angle))
+				table.insert(ny, sy + lx * math.sin(angle) + ly * math.cos(angle))
+				table.insert(np, 1.0)
+			end
+
+			table.insert(newStrokes, {
+				x = nx,
+				y = ny,
+				pressure = np,
+				tool = stroke.tool,
+				width = stroke.width,
+				color = stroke.color,
+				fill = stroke.fill,
+				lineStyle = stroke.lineStyle,
+			})
+			table.insert(refsToDelete, stroke.ref)
+		elseif shapeType == "curved" then
+			table.insert(newStrokes, {
+				x = { sx, ex },
+				y = { sy, ey },
+				pressure = { 1.0, 1.0 },
+				tool = stroke.tool,
+				width = stroke.width,
+				color = stroke.color,
+				fill = stroke.fill,
+				lineStyle = stroke.lineStyle,
+			})
+			table.insert(refsToDelete, stroke.ref)
+		end
+	end
+
+	if #refsToDelete > 0 then
+		app.clearSelection()
+		app.addToSelection(refsToDelete)
+		app.activateAction("delete")
+		app.addStrokes({ strokes = newStrokes })
+		app.refreshPage()
+	end
+end
+
 function initUi()
 	app.registerUi({ menu = "Cycle Shapes", callback = "cycleShapes", accelerator = "<Alt>s" })
 
@@ -589,4 +734,5 @@ function initUi()
 	app.registerUi({ menu = "Shape: Table Cycle Width", callback = "cycleTableWidth", accelerator = "<Alt>h" })
 	app.registerUi({ menu = "Shape: Table Cycle Height", callback = "cycleTableHeight", accelerator = "<Alt>l" })
 	app.registerUi({ menu = "Shape: Table Make Square", callback = "makeTableSquare", accelerator = "<Alt>k" })
+	app.registerUi({ menu = "Shape: Toggle Wavy Line", callback = "toggleWavyLine", accelerator = "w" })
 end
