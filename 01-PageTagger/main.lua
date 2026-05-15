@@ -96,7 +96,7 @@ function initUi()
 		iconName = "tag_icon_1",
 	})
 	app.registerUi({
-		menu = "    ├─ Tag Slot 2 (default: hard)",
+		menu = "    ├─ Tag Slot 2 (default: key)",
 		callback = "toolbarQuickTag_2",
 		toolbarId = "tag_slot_2",
 		iconName = "tag_icon_2",

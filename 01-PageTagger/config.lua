@@ -26,7 +26,7 @@ config.CUSTOM_TAG_COLORS = {
 }
 
 -- Default fallback tag pool. Actual configuration is loaded from the PDF's @metadata layer.
-config.DEFAULT_QUICK_TAGS = { "core", "hard", "insight", "code", "todo", "skip" }
+config.DEFAULT_QUICK_TAGS = { "core", "key", "insight", "code", "todo", "skip" }
 
 config.TAGS_PER_DIALOG = 6
 config.MAX_TAGS_PER_PAGE = 8
