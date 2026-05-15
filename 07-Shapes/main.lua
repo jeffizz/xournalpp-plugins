@@ -50,8 +50,13 @@ local function createStroke(px, py, color, fillValue)
 	}
 end
 
-local function renderAndSelect(strokesTable)
-	app.addStrokes({ strokes = strokesTable })
+local function renderAndSelect(strokesTable, splinesTable)
+	if strokesTable and #strokesTable > 0 then
+		app.addStrokes({ strokes = strokesTable })
+	end
+	if splinesTable and #splinesTable > 0 then
+		app.addSplines({ splines = splinesTable })
+	end
 	app.refreshPage()
 
 	local doc = app.getDocumentStructure()
@@ -60,8 +65,13 @@ local function renderAndSelect(strokesTable)
 
 	local allStrokes = app.getStrokes("layer")
 	lastDrawnRefs = {}
-	if allStrokes then
-		for i = #allStrokes, #allStrokes - #strokesTable + 1, -1 do
+
+	local countStrokes = strokesTable and #strokesTable or 0
+	local countSplines = splinesTable and #splinesTable or 0
+	local totalAdded = countStrokes + countSplines
+
+	if allStrokes and totalAdded > 0 then
+		for i = #allStrokes, #allStrokes - totalAdded + 1, -1 do
 			if allStrokes[i] and allStrokes[i].ref then
 				table.insert(lastDrawnRefs, allStrokes[i].ref)
 			end
@@ -72,6 +82,79 @@ local function renderAndSelect(strokesTable)
 	end
 
 	return lastDrawnRefs
+end
+
+local function createSplineCircle(cx, cy, r, color, fillValue)
+	local k = r * 0.55228475
+	return {
+		coordinates = {
+			cx,
+			cy - r,
+			cx + k,
+			cy - r,
+			cx + r,
+			cy - k,
+			cx + r,
+			cy,
+			cx + r,
+			cy,
+			cx + r,
+			cy + k,
+			cx + k,
+			cy + r,
+			cx,
+			cy + r,
+			cx,
+			cy + r,
+			cx - k,
+			cy + r,
+			cx - r,
+			cy + k,
+			cx - r,
+			cy,
+			cx - r,
+			cy,
+			cx - r,
+			cy - k,
+			cx - k,
+			cy - r,
+			cx,
+			cy - r,
+		},
+		tool = "pen",
+		width = 2.0,
+		color = color,
+		fill = fillValue,
+		lineStyle = "solid",
+	}
+end
+
+local function createSplineHeart(cx, cy, r, color, fillValue)
+	return {
+		coordinates = {
+			cx,
+			cy - r * 0.3,
+			cx + r * 1.2,
+			cy - r * 1.2,
+			cx + r * 1.2,
+			cy + r * 0.4,
+			cx,
+			cy + r * 0.9,
+			cx,
+			cy + r * 0.9,
+			cx - r * 1.2,
+			cy + r * 0.4,
+			cx - r * 1.2,
+			cy - r * 1.2,
+			cx,
+			cy - r * 0.3,
+		},
+		tool = "pen",
+		width = 2.0,
+		color = color,
+		fill = fillValue,
+		lineStyle = "solid",
+	}
 end
 
 local function insertHollowStar()
@@ -105,32 +188,13 @@ end
 
 local function insertHeart()
 	local cx, cy = getCenter()
-	local px, py = {}, {}
-	local scale = GLOBAL_RADIUS / 17.0
-	for i = 0, 360, 5 do
-		local t = math.rad(i)
-		local x = 16 * math.sin(t) ^ 3
-		local y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
-		table.insert(px, cx + x * scale)
-		table.insert(py, cy - y * scale)
-	end
-	table.insert(px, px[1])
-	table.insert(py, py[1])
-	renderAndSelect({ createStroke(px, py, 0xE74C3C, 178) })
+	renderAndSelect(nil, { createSplineHeart(cx, cy, GLOBAL_RADIUS, 0xE74C3C, 178) })
 end
 
 local function insertCheckmark()
 	local cx, cy = getCenter()
 	local greenColor = 0x27AE60
 	local s = GLOBAL_RADIUS / 35.0
-	local circleX, circleY = {}, {}
-	for i = 0, 360, 10 do
-		table.insert(circleX, cx + GLOBAL_RADIUS * math.cos(math.rad(i)))
-		table.insert(circleY, cy + GLOBAL_RADIUS * math.sin(math.rad(i)))
-	end
-	table.insert(circleX, circleX[1])
-	table.insert(circleY, circleY[1])
-	local strokeCircle = createStroke(circleX, circleY, greenColor, 60)
 
 	local px, py = {}, {}
 	local pts = {
@@ -139,7 +203,10 @@ local function insertCheckmark()
 		{ 22 * s, -16 * s },
 		{ 13 * s, -22 * s },
 		{ -5 * s, 2 * s },
-		{ -11 * s, -3 * s },
+		{
+			-11 * s,
+			-3 * s,
+		},
 	}
 	for _, pt in ipairs(pts) do
 		table.insert(px, cx + pt[1])
@@ -148,21 +215,16 @@ local function insertCheckmark()
 	table.insert(px, cx + pts[1][1])
 	table.insert(py, cy + pts[1][2])
 
-	renderAndSelect({ strokeCircle, createStroke(px, py, greenColor, 255) })
+	renderAndSelect(
+		{ createStroke(px, py, greenColor, 255) },
+		{ createSplineCircle(cx, cy, GLOBAL_RADIUS, greenColor, 60) }
+	)
 end
 
 local function insertExclamation()
 	local cx, cy = getCenter()
 	local orangeColor = 0xF39C12
 	local s = GLOBAL_RADIUS / 35.0
-	local circleX, circleY = {}, {}
-	for i = 0, 360, 10 do
-		table.insert(circleX, cx + GLOBAL_RADIUS * math.cos(math.rad(i)))
-		table.insert(circleY, cy + GLOBAL_RADIUS * math.sin(math.rad(i)))
-	end
-	table.insert(circleX, circleX[1])
-	table.insert(circleY, circleY[1])
-	local strokeCircle = createStroke(circleX, circleY, orangeColor, 60)
 
 	local topX, topY = {}, {}
 	local topPts = { { -5 * s, -27 * s }, { 5 * s, -27 * s }, { 3 * s, 10 * s }, { -3 * s, 10 * s } }
@@ -182,25 +244,16 @@ local function insertExclamation()
 	table.insert(dotX, dotX[1])
 	table.insert(dotY, dotY[1])
 
-	renderAndSelect({
-		strokeCircle,
-		createStroke(topX, topY, orangeColor, 255),
-		createStroke(dotX, dotY, orangeColor, 255),
-	})
+	renderAndSelect(
+		{ createStroke(topX, topY, orangeColor, 255), createStroke(dotX, dotY, orangeColor, 255) },
+		{ createSplineCircle(cx, cy, GLOBAL_RADIUS, orangeColor, 60) }
+	)
 end
 
 local function insertCross()
 	local cx, cy = getCenter()
 	local redColor = 0xE74C3C
 	local s = GLOBAL_RADIUS / 35.0
-	local circleX, circleY = {}, {}
-	for i = 0, 360, 10 do
-		table.insert(circleX, cx + GLOBAL_RADIUS * math.cos(math.rad(i)))
-		table.insert(circleY, cy + GLOBAL_RADIUS * math.sin(math.rad(i)))
-	end
-	table.insert(circleX, circleX[1])
-	table.insert(circleY, circleY[1])
-	local strokeCircle = createStroke(circleX, circleY, redColor, 60)
 
 	local bar1X, bar1Y = {}, {}
 	local b1Pts = { { -14 * s, -20 * s }, { -20 * s, -14 * s }, { 14 * s, 20 * s }, { 20 * s, 14 * s } }
@@ -220,25 +273,16 @@ local function insertCross()
 	table.insert(bar2X, bar2X[1])
 	table.insert(bar2Y, bar2Y[1])
 
-	renderAndSelect({
-		strokeCircle,
-		createStroke(bar1X, bar1Y, redColor, 255),
-		createStroke(bar2X, bar2Y, redColor, 255),
-	})
+	renderAndSelect(
+		{ createStroke(bar1X, bar1Y, redColor, 255), createStroke(bar2X, bar2Y, redColor, 255) },
+		{ createSplineCircle(cx, cy, GLOBAL_RADIUS, redColor, 60) }
+	)
 end
 
 local function insertQuestion()
 	local cx, cy = getCenter()
 	local color = 0xE5A50A
 	local s = GLOBAL_RADIUS / 35.0
-	local circleX, circleY = {}, {}
-	for i = 0, 360, 10 do
-		table.insert(circleX, cx + GLOBAL_RADIUS * math.cos(math.rad(i)))
-		table.insert(circleY, cy + GLOBAL_RADIUS * math.sin(math.rad(i)))
-	end
-	table.insert(circleX, circleX[1])
-	table.insert(circleY, circleY[1])
-	local strokeCircle = createStroke(circleX, circleY, color, 60)
 
 	local topX, topY = {}, {}
 	for a = 140, 400, 10 do
@@ -269,7 +313,10 @@ local function insertQuestion()
 	table.insert(dotX, dotX[1])
 	table.insert(dotY, dotY[1])
 
-	renderAndSelect({ strokeCircle, createStroke(topX, topY, color, 255), createStroke(dotX, dotY, color, 255) })
+	renderAndSelect(
+		{ createStroke(topX, topY, color, 255), createStroke(dotX, dotY, color, 255) },
+		{ createSplineCircle(cx, cy, GLOBAL_RADIUS, color, 60) }
+	)
 end
 
 function drawHollowStar()
@@ -377,16 +424,10 @@ local function insertSequenceMarker(shapeType)
 	end
 
 	local strokes = {}
+	local splines = {}
 
 	if shapeType == 1 then
-		local circleX, circleY = {}, {}
-		for i = 0, 360, 15 do
-			table.insert(circleX, cx + r * math.cos(math.rad(i)))
-			table.insert(circleY, cy + r * math.sin(math.rad(i)))
-		end
-		table.insert(circleX, circleX[1])
-		table.insert(circleY, circleY[1])
-		table.insert(strokes, createStroke(circleX, circleY, redColor, 20))
+		table.insert(splines, createSplineCircle(cx, cy, r, redColor, 20))
 	else
 		local triX, triY = {}, {}
 		local pts = { { 0, -9.5 }, { 9, 5 }, { -9, 5 } }
@@ -471,7 +512,7 @@ local function insertSequenceMarker(shapeType)
 	end
 
 	app.changeActionState("select-tool", app.C.Tool_pen)
-	seqRefs = renderAndSelect(strokes)
+	seqRefs = renderAndSelect(strokes, splines)
 end
 
 function drawSeqCircle()
@@ -647,6 +688,7 @@ function toggleWavyLine()
 	end
 
 	local newStrokes = {}
+	local newSplines = {}
 	local refsToDelete = {}
 
 	for _, stroke in ipairs(selectedStrokes) do
@@ -654,42 +696,62 @@ function toggleWavyLine()
 
 		if shapeType == "straight" then
 			local angle = math.atan2 and math.atan2(ey - sy, ex - sx) or math.atan(ey - sy, ex - sx)
+			local cos_a, sin_a = math.cos(angle), math.sin(angle)
 
 			local amplitude = 0.7 + (stroke.width or 2.0) * 0.2
-			local wavelength = 6
-			local steps = math.max(20, math.floor(dist / 0.4))
+			local wavelength = 6.0
+			local hw = dist / math.max(1, math.floor(dist / (wavelength / 2)))
+			local n_waves = math.floor(dist / hw + 0.5)
 
-			local nx, ny, np = {}, {}, {}
-			for i = 0, steps do
-				local t = (i / steps) * dist
+			local coords = {}
 
-				local env = 1.0
-				if t < wavelength / 2 then
-					env = t / (wavelength / 2)
-				end
-				if dist - t < wavelength / 2 then
-					env = (dist - t) / (wavelength / 2)
-				end
-
-				local lx = t
-				local ly = amplitude * env * math.sin(t / wavelength * math.pi * 2)
-
-				table.insert(nx, sx + lx * math.cos(angle) - ly * math.sin(angle))
-				table.insert(ny, sy + lx * math.sin(angle) + ly * math.cos(angle))
-				table.insert(np, 1.0)
+			local function rot(lx, ly)
+				return sx + lx * cos_a - ly * sin_a, sy + lx * sin_a + ly * cos_a
 			end
 
-			table.insert(newStrokes, {
-				x = nx,
-				y = ny,
-				pressure = np,
-				tool = stroke.tool,
-				width = stroke.width,
-				color = stroke.color,
-				fill = stroke.fill,
-				lineStyle = stroke.lineStyle,
-			})
-			table.insert(refsToDelete, stroke.ref)
+			for i = 0, n_waves - 1 do
+				local t0 = i * hw
+				local t3 = (i + 1) * hw
+				local sign = (i % 2 == 0) and 1 or -1
+
+				local env_mid = (t0 + t3) / 2
+				local env = 1.0
+				if env_mid < wavelength / 2 then
+					env = env_mid / (wavelength / 2)
+				end
+				if dist - env_mid < wavelength / 2 then
+					env = (dist - env_mid) / (wavelength / 2)
+				end
+
+				local cur_A = amplitude * env * sign * 1.333
+				local cp_dist = hw / 3
+
+				local p0x, p0y = rot(t0, 0)
+				local p1x, p1y = rot(t0 + cp_dist, cur_A)
+				local p2x, p2y = rot(t3 - cp_dist, cur_A)
+				local p3x, p3y = rot(t3, 0)
+
+				table.insert(coords, p0x)
+				table.insert(coords, p0y)
+				table.insert(coords, p1x)
+				table.insert(coords, p1y)
+				table.insert(coords, p2x)
+				table.insert(coords, p2y)
+				table.insert(coords, p3x)
+				table.insert(coords, p3y)
+			end
+
+			if #coords > 0 then
+				table.insert(newSplines, {
+					coordinates = coords,
+					tool = stroke.tool,
+					width = stroke.width,
+					color = stroke.color,
+					fill = stroke.fill,
+					lineStyle = stroke.lineStyle,
+				})
+				table.insert(refsToDelete, stroke.ref)
+			end
 		elseif shapeType == "curved" then
 			table.insert(newStrokes, {
 				x = { sx, ex },
@@ -709,7 +771,13 @@ function toggleWavyLine()
 		app.clearSelection()
 		app.addToSelection(refsToDelete)
 		app.activateAction("delete")
-		app.addStrokes({ strokes = newStrokes })
+
+		if #newStrokes > 0 then
+			app.addStrokes({ strokes = newStrokes })
+		end
+		if #newSplines > 0 then
+			app.addSplines({ splines = newSplines })
+		end
 		app.refreshPage()
 	end
 end
