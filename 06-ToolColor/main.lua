@@ -424,9 +424,9 @@ function initUi()
 	if enableShortcuts then
 		app.registerUi({ ["menu"] = "Text Tool (e)", ["callback"] = "textTool", ["accelerator"] = "e" })
 		app.registerUi({
-			["menu"] = "Pen Tool (a)",
+			["menu"] = "Pen Tool (z)",
 			["callback"] = "penTool",
-			["accelerator"] = "a",
+			["accelerator"] = "z",
 			toolbarId = "sc_tool_pen",
 			iconName = "sc_tool_pen",
 		})

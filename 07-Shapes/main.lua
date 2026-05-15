@@ -714,6 +714,228 @@ function toggleWavyLine()
 	end
 end
 
+-- ============================================================================
+-- Smart Arrow Toggle
+-- ============================================================================
+
+local function hasStartArrowSignature(px, py)
+	if #px < 4 then
+		return false
+	end
+	if math.abs(px[2] - px[4]) > 0.05 or math.abs(py[2] - py[4]) > 0.05 then
+		return false
+	end
+	local d1 = math.sqrt((px[1] - px[2]) ^ 2 + (py[1] - py[2]) ^ 2)
+	local d2 = math.sqrt((px[3] - px[2]) ^ 2 + (py[3] - py[2]) ^ 2)
+	return math.abs(d1 - d2) < 2.0
+end
+
+local function hasEndArrowSignature(px, py)
+	local m = #px
+	if m < 4 then
+		return false
+	end
+	if math.abs(px[m - 1] - px[m - 3]) > 0.05 or math.abs(py[m - 1] - py[m - 3]) > 0.05 then
+		return false
+	end
+	local d1 = math.sqrt((px[m] - px[m - 1]) ^ 2 + (py[m] - py[m - 1]) ^ 2)
+	local d2 = math.sqrt((px[m - 2] - px[m - 1]) ^ 2 + (py[m - 2] - py[m - 1]) ^ 2)
+	return math.abs(d1 - d2) < 2.0
+end
+
+function toggleArrowLine()
+	local success, selectedStrokes = pcall(app.getStrokes, "selection")
+	if not success or type(selectedStrokes) ~= "table" or #selectedStrokes == 0 then
+		return
+	end
+
+	local newStrokes = {}
+	local refsToDelete = {}
+	local convertedAny = false
+
+	for _, stroke in ipairs(selectedStrokes) do
+		if stroke.tool == "pen" or stroke.tool == "highlighter" then
+			local px, py, pp = stroke.x, stroke.y, stroke.pressure
+			local has_pres = (type(pp) == "table" and #pp == #px)
+
+			local hasStart = hasStartArrowSignature(px, py)
+			local hasEnd = hasEndArrowSignature(px, py)
+
+			local currentState = 0
+			if hasStart and hasEnd then
+				currentState = 3
+			elseif hasStart then
+				currentState = 2
+			elseif hasEnd then
+				currentState = 1
+			end
+
+			local startIdx = hasStart and 4 or 1
+			local endIdx = hasEnd and (#px - 3) or #px
+
+			if endIdx >= startIdx then
+				local bx, by, bp = {}, {}, {}
+				for i = startIdx, endIdx do
+					table.insert(bx, px[i])
+					table.insert(by, py[i])
+					if has_pres then
+						table.insert(bp, pp[i])
+					end
+				end
+
+				local maxDist, furthestIdx = 0, 1
+				for i = 2, #bx do
+					local d = math.sqrt((bx[i] - bx[1]) ^ 2 + (by[i] - by[1]) ^ 2)
+					if d > maxDist then
+						maxDist = d
+						furthestIdx = i
+					end
+				end
+
+				local startEndDist = math.sqrt((bx[#bx] - bx[1]) ^ 2 + (by[#by] - by[1]) ^ 2)
+				local isOpen = startEndDist >= maxDist * 0.15
+
+				local maxDeviation = 0
+				if maxDist > 0 then
+					local x1, y1 = bx[1], by[1]
+					local x2, y2 = bx[furthestIdx], by[furthestIdx]
+					for i = 1, #bx do
+						local distToLine = math.abs((x2 - x1) * (y1 - by[i]) - (x1 - bx[i]) * (y2 - y1)) / maxDist
+						if distToLine > maxDeviation then
+							maxDeviation = distToLine
+						end
+					end
+				end
+
+				local isFlattened = maxDeviation <= math.max(4.0, maxDist * 0.05)
+
+				if maxDist >= 10 and (isOpen or isFlattened) then
+					if not isOpen and isFlattened then
+						bx = { bx[1], bx[furthestIdx] }
+						by = { by[1], by[furthestIdx] }
+						if has_pres then
+							bp = { bp[1], bp[furthestIdx] }
+						end
+					end
+					local nextState = (currentState + 1) % 4
+					local nx, ny, np = {}, {}, {}
+					local L = 8.0 + (stroke.width or 2.0) * 1.5
+					local angle_offset = math.pi / 6
+					local atan2 = math.atan2 and math.atan2 or math.atan
+
+					for i = 1, #bx do
+						table.insert(nx, bx[i])
+						table.insert(ny, by[i])
+						if has_pres then
+							table.insert(np, bp[i])
+						end
+					end
+
+					if nextState == 2 or nextState == 3 then
+						local sx, sy = bx[1], by[1]
+						local angle = 0
+						for i = 2, #bx do
+							if math.sqrt((bx[i] - sx) ^ 2 + (by[i] - sy) ^ 2) > 3 then
+								angle = atan2(by[i] - sy, bx[i] - sx)
+								break
+							end
+						end
+						local b1x, b1y =
+							sx + L * math.cos(angle - angle_offset), sy + L * math.sin(angle - angle_offset)
+						local b2x, b2y =
+							sx + L * math.cos(angle + angle_offset), sy + L * math.sin(angle + angle_offset)
+
+						table.insert(nx, 1, b2x)
+						table.insert(ny, 1, b2y)
+						if has_pres then
+							table.insert(np, 1, bp[1])
+						end
+						table.insert(nx, 1, sx)
+						table.insert(ny, 1, sy)
+						if has_pres then
+							table.insert(np, 1, bp[1])
+						end
+						table.insert(nx, 1, b1x)
+						table.insert(ny, 1, b1y)
+						if has_pres then
+							table.insert(np, 1, bp[1])
+						end
+					end
+
+					if nextState == 1 or nextState == 3 then
+						local m = #bx
+						local ex, ey = bx[m], by[m]
+						local angle = 0
+						for i = m - 1, 1, -1 do
+							if math.sqrt((ex - bx[i]) ^ 2 + (ey - by[i]) ^ 2) > 3 then
+								angle = atan2(ey - by[i], ex - bx[i])
+								break
+							end
+						end
+						local b1x, b1y =
+							ex - L * math.cos(angle - angle_offset), ey - L * math.sin(angle - angle_offset)
+						local b2x, b2y =
+							ex - L * math.cos(angle + angle_offset), ey - L * math.sin(angle + angle_offset)
+
+						table.insert(nx, b1x)
+						table.insert(ny, b1y)
+						if has_pres then
+							table.insert(np, bp[m])
+						end
+						table.insert(nx, ex)
+						table.insert(ny, ey)
+						if has_pres then
+							table.insert(np, bp[m])
+						end
+						table.insert(nx, b2x)
+						table.insert(ny, b2y)
+						if has_pres then
+							table.insert(np, bp[m])
+						end
+					end
+
+					table.insert(newStrokes, {
+						x = nx,
+						y = ny,
+						pressure = has_pres and np or nil,
+						tool = stroke.tool,
+						width = stroke.width,
+						color = stroke.color,
+						fill = stroke.fill,
+						lineStyle = stroke.lineStyle,
+					})
+					table.insert(refsToDelete, stroke.ref)
+					convertedAny = true
+				end
+			end
+		end
+	end
+
+	if convertedAny and #refsToDelete > 0 then
+		app.clearSelection()
+		app.addToSelection(refsToDelete)
+		app.activateAction("delete")
+
+		app.addStrokes({ strokes = newStrokes })
+
+		local allStrokes = app.getStrokes("layer")
+		local newRefs = {}
+		if type(allStrokes) == "table" and #allStrokes >= #newStrokes then
+			for i = #allStrokes, #allStrokes - #newStrokes + 1, -1 do
+				if allStrokes[i] and allStrokes[i].ref then
+					table.insert(newRefs, allStrokes[i].ref)
+				end
+			end
+		end
+
+		if #newRefs > 0 then
+			app.addToSelection(newRefs)
+		end
+
+		app.refreshPage()
+	end
+end
+
 function initUi()
 	app.registerUi({ menu = "Cycle Shapes", callback = "cycleShapes", accelerator = "<Alt>s" })
 
@@ -735,4 +957,5 @@ function initUi()
 	app.registerUi({ menu = "Shape: Table Cycle Height", callback = "cycleTableHeight", accelerator = "<Alt>l" })
 	app.registerUi({ menu = "Shape: Table Make Square", callback = "makeTableSquare", accelerator = "<Alt>k" })
 	app.registerUi({ menu = "Shape: Toggle Wavy Line", callback = "toggleWavyLine", accelerator = "w" })
+	app.registerUi({ menu = "Shape: Toggle Arrows", callback = "toggleArrowLine", accelerator = "a" })
 end
