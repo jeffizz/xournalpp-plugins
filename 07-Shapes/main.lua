@@ -430,7 +430,9 @@ local function insertSequenceMarker(shapeType)
 	local splines = {}
 
 	if shapeType == 1 then
-		table.insert(splines, createSplineCircle(cx, cy, r, redColor, 20))
+		local splineCircle = createSplineCircle(cx, cy, r, redColor, 20)
+		splineCircle.width = 1.0
+		table.insert(splines, splineCircle)
 	else
 		local triX, triY = {}, {}
 		local pts = { { 0, -9.5 }, { 9, 5 }, { -9, 5 } }
@@ -545,24 +547,127 @@ local function drawTableGrid()
 	return renderAndSelect(strokes)
 end
 
+local function checkSelectedRectangle()
+	local success, selectedStrokes = pcall(app.getStrokes, "selection")
+	if not success or type(selectedStrokes) ~= "table" or #selectedStrokes ~= 1 then
+		return false
+	end
+
+	local stroke = selectedStrokes[1]
+	if not stroke.x or #stroke.x < 4 then
+		return false
+	end
+
+	local minX, maxX = math.huge, -math.huge
+	local minY, maxY = math.huge, -math.huge
+	local totalLen = 0
+
+	for i = 1, #stroke.x do
+		local x, y = stroke.x[i], stroke.y[i]
+		if x < minX then
+			minX = x
+		end
+		if x > maxX then
+			maxX = x
+		end
+		if y < minY then
+			minY = y
+		end
+		if y > maxY then
+			maxY = y
+		end
+		if i > 1 then
+			totalLen = totalLen + math.sqrt((stroke.x[i] - stroke.x[i - 1]) ^ 2 + (stroke.y[i] - stroke.y[i - 1]) ^ 2)
+		end
+	end
+
+	local w = maxX - minX
+	local h = maxY - minY
+	local bboxPerimeter = 2 * (w + h)
+	local startEndDist = math.sqrt((stroke.x[#stroke.x] - stroke.x[1]) ^ 2 + (stroke.y[#stroke.y] - stroke.y[1]) ^ 2)
+
+	if startEndDist < 15 and w > 10 and h > 5 and math.abs(totalLen - bboxPerimeter) < bboxPerimeter * 0.20 then
+		return true, minX, minY, w, h, stroke.ref
+	end
+	return false
+end
+
 local function handleTableAction(action)
 	local doc = app.getDocumentStructure()
 	local pageNo = doc.currentPage
 	local layerNo = doc.pages[pageNo].currentLayer
 	local now = os.time()
 
-	if (now - tblState.lastTime > 5) or (tblState.page ~= pageNo) or (tblState.layer ~= layerNo) then
-		local cx, cy = getCenter()
-		tblState.startX = cx - 60
-		tblState.startY = cy - 17.5
-		tblState.rows = 1
-		tblState.cols = 1
-		tblState.cellW = 30
-		tblState.cellH = 15
-		tblState.refs = {}
+	local success, sel = pcall(app.getStrokes, "selection")
+	local selCount = (success and type(sel) == "table") and #sel or 0
 
-		if action == "makeSquare" then
-			tblState.cellW = tblState.cellH
+	local isRect, rx, ry, rw, rh, rref = checkSelectedRectangle()
+
+	local isSelectingCurrentTable = false
+	if selCount > 0 and #tblState.refs > 0 then
+		local matchCount = 0
+		for _, s in ipairs(sel) do
+			for _, r in ipairs(tblState.refs) do
+				if s.ref == r then
+					matchCount = matchCount + 1
+					break
+				end
+			end
+		end
+		if matchCount > 0 and matchCount == selCount then
+			isSelectingCurrentTable = true
+		end
+	end
+
+	if selCount > 0 and not isRect and not isSelectingCurrentTable then
+		return
+	end
+
+	local shouldInit = (now - tblState.lastTime > 5) or (tblState.page ~= pageNo) or (tblState.layer ~= layerNo)
+	if isRect then
+		shouldInit = true
+	end
+
+	if shouldInit then
+		if #tblState.refs > 0 then
+			app.clearSelection()
+			app.addToSelection(tblState.refs)
+			app.activateAction("delete")
+		end
+
+		if isRect then
+			tblState.startX = rx
+			tblState.startY = ry
+			tblState.cellW = rw
+			tblState.cellH = rh
+			tblState.rows = 1
+			tblState.cols = 1
+			tblState.refs = {}
+
+			if action == "addCol" then
+				tblState.cols = 2
+			elseif action == "addRow" then
+				tblState.rows = 2
+			elseif action == "makeSquare" then
+				tblState.cellW = tblState.cellH
+			end
+
+			app.clearSelection()
+			app.addToSelection({ rref })
+			app.activateAction("delete")
+		else
+			local cx, cy = getCenter()
+			tblState.startX = cx - 60
+			tblState.startY = cy - 17.5
+			tblState.rows = 1
+			tblState.cols = 1
+			tblState.cellW = 30
+			tblState.cellH = 15
+			tblState.refs = {}
+
+			if action == "makeSquare" then
+				tblState.cellW = tblState.cellH
+			end
 		end
 	else
 		if action == "addCol" then
@@ -589,9 +694,9 @@ local function handleTableAction(action)
 	tblState.layer = layerNo
 
 	if #tblState.refs > 0 then
+		app.clearSelection()
 		app.addToSelection(tblState.refs)
 		app.activateAction("delete")
-		app.refreshPage()
 	end
 
 	tblState.refs = drawTableGrid()
@@ -1220,8 +1325,8 @@ function initUi()
 
 	app.registerUi({ menu = "Shape: Table Add Column", callback = "drawTableCol", accelerator = "<Alt>t" })
 	app.registerUi({ menu = "Shape: Table New Row", callback = "drawTableRow", accelerator = "<Alt>r" })
-	app.registerUi({ menu = "Shape: Table Cycle Width", callback = "cycleTableWidth", accelerator = "<Alt>h" })
-	app.registerUi({ menu = "Shape: Table Cycle Height", callback = "cycleTableHeight", accelerator = "<Alt>l" })
+	app.registerUi({ menu = "Shape: Table Cycle Width", callback = "cycleTableWidth", accelerator = "<Alt>l" })
+	app.registerUi({ menu = "Shape: Table Cycle Height", callback = "cycleTableHeight", accelerator = "<Alt>h" })
 	app.registerUi({ menu = "Shape: Table Make Square", callback = "makeTableSquare", accelerator = "<Alt>k" })
 	app.registerUi({ menu = "Shape: Toggle Wavy Line", callback = "toggleWavyLine", accelerator = "w" })
 	app.registerUi({ menu = "Shape: Toggle Arrows", callback = "toggleArrowLine", accelerator = "a" })
