@@ -11,6 +11,9 @@ local seqLastTime = 0
 local seqNum = 1
 local seqLastShapeType = 0
 
+local braceState = 1
+local lastBraceTime = 0
+
 local tblState = {
 	lastTime = 0,
 	page = nil,
@@ -1004,6 +1007,202 @@ function toggleArrowLine()
 	end
 end
 
+-- ============================================================================
+-- Smart Curly Brace Toggle
+-- ============================================================================
+
+function toggleCurlyBrace()
+	local success, selectedStrokes = pcall(app.getStrokes, "selection")
+	if not success or type(selectedStrokes) ~= "table" or #selectedStrokes == 0 then
+		return
+	end
+
+	local newStrokes = {}
+	local refsToDelete = {}
+	local convertedAny = false
+
+	local now = os.time()
+	local isNewInteraction = (now - lastBraceTime > 3)
+	lastBraceTime = now
+	local stateUpdated = false
+
+	for _, stroke in ipairs(selectedStrokes) do
+		if stroke.tool == "pen" or stroke.tool == "highlighter" then
+			local bx, by = stroke.x, stroke.y
+
+			local maxDist, furthestIdx = 0, 1
+			for i = 2, #bx do
+				local d = math.sqrt((bx[i] - bx[1]) ^ 2 + (by[i] - by[1]) ^ 2)
+				if d > maxDist then
+					maxDist = d
+					furthestIdx = i
+				end
+			end
+
+			local startEndDist = math.sqrt((bx[#bx] - bx[1]) ^ 2 + (by[#by] - by[1]) ^ 2)
+			local sx, sy, ex, ey
+
+			if startEndDist < 15 then
+				sx, sy = bx[1], by[1]
+				ex, ey = bx[furthestIdx], by[furthestIdx]
+			else
+				sx, sy = bx[1], by[1]
+				ex, ey = bx[#bx], by[#by]
+			end
+
+			if ey < sy then
+				sx, ex = ex, sx
+				sy, ey = ey, sy
+			end
+
+			local dist = math.sqrt((ex - sx) ^ 2 + (ey - sy) ^ 2)
+
+			if dist > 15 then
+				local angle = math.atan2(ey - sy, ex - sx)
+				local cos_a, sin_a = math.cos(angle), math.sin(angle)
+
+				local max_abs_dev = 0
+				local dev_sign = 0
+				local best_peak_lx = dist * 0.5
+
+				for i = 1, #bx do
+					local lx = (bx[i] - sx) * cos_a + (by[i] - sy) * sin_a
+					local ly = -(bx[i] - sx) * sin_a + (by[i] - sy) * cos_a
+					local abs_ly = math.abs(ly)
+
+					if abs_ly > max_abs_dev then
+						max_abs_dev = abs_ly
+						dev_sign = ly > 0 and 1 or -1
+						best_peak_lx = lx
+					end
+				end
+
+				if not stateUpdated then
+					if isNewInteraction then
+						if max_abs_dev > 4.0 then
+							braceState = (dev_sign < 0) and 1 or 2
+						else
+							braceState = 1
+						end
+					else
+						braceState = (braceState % 4) + 1
+					end
+					stateUpdated = true
+				end
+
+				local peak_ratio = 0.5
+				if max_abs_dev > 4.0 then
+					peak_ratio = math.max(0.15, math.min(0.85, best_peak_lx / dist))
+				end
+
+				local bulge_width = 16 + (stroke.width or 2.0) * 1.5
+				if max_abs_dev > 8.0 then
+					bulge_width = max_abs_dev
+				end
+
+				local W_local = (braceState == 1 or braceState == 3) and -bulge_width or bulge_width
+				local p0x, p0y = 0, 0
+				local p1x, p1y, p2x, p2y, p3x, p3y
+				local p4x, p4y, p5x, p5y, p6x, p6y, p7x, p7y
+
+				local pr = peak_ratio
+				local inv_pr = 1.0 - pr
+
+				if braceState == 1 or braceState == 2 then
+					p1x, p1y = dist * (pr * 0.2), W_local * 0.8
+					p2x, p2y = dist * (pr * 0.8), W_local * 0.2
+					p3x, p3y = dist * pr, W_local
+
+					p4x, p4y = dist * pr, W_local
+					p5x, p5y = dist * (pr + inv_pr * 0.2), W_local * 0.2
+					p6x, p6y = dist * (pr + inv_pr * 0.8), W_local * 0.8
+					p7x, p7y = dist, 0
+				else
+					p1x, p1y = dist * (pr * 0.3), 0
+					p2x, p2y = dist * pr, W_local * 0.15
+					p3x, p3y = dist * pr, W_local
+
+					p4x, p4y = dist * pr, W_local
+					p5x, p5y = dist * pr, W_local * 0.15
+					p6x, p6y = dist * (pr + inv_pr * 0.7), 0
+					p7x, p7y = dist, 0
+				end
+
+				local function rot(lx, ly)
+					return sx + lx * cos_a - ly * sin_a, sy + lx * sin_a + ly * cos_a
+				end
+
+				local function bezier(t, p0, p1, p2, p3)
+					local u = 1 - t
+					return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3
+				end
+
+				local nx, ny, np = {}, {}, {}
+				local steps = math.max(20, math.floor(dist / 2.0))
+
+				for i = 0, steps do
+					local t = i / steps
+					local lx = bezier(t, p0x, p1x, p2x, p3x)
+					local ly = bezier(t, p0y, p1y, p2y, p3y)
+					local gx, gy = rot(lx, ly)
+					table.insert(nx, gx)
+					table.insert(ny, gy)
+					table.insert(np, 1.0)
+				end
+
+				for i = 1, steps do
+					local t = i / steps
+					local lx = bezier(t, p4x, p5x, p6x, p7x)
+					local ly = bezier(t, p4y, p5y, p6y, p7y)
+					local gx, gy = rot(lx, ly)
+					table.insert(nx, gx)
+					table.insert(ny, gy)
+					table.insert(np, 1.0)
+				end
+
+				table.insert(newStrokes, {
+					x = nx,
+					y = ny,
+					pressure = np,
+					tool = stroke.tool,
+					width = stroke.width,
+					color = stroke.color,
+					fill = stroke.fill,
+					lineStyle = stroke.lineStyle,
+				})
+
+				table.insert(refsToDelete, stroke.ref)
+				convertedAny = true
+			end
+		end
+	end
+
+	if convertedAny and #refsToDelete > 0 then
+		app.clearSelection()
+		app.addToSelection(refsToDelete)
+		app.activateAction("delete")
+
+		if #newStrokes > 0 then
+			app.addStrokes({ strokes = newStrokes })
+		end
+
+		local allStrokes = app.getStrokes("layer")
+		local newRefs = {}
+		if type(allStrokes) == "table" and #allStrokes >= #newStrokes then
+			for i = #allStrokes, #allStrokes - #newStrokes + 1, -1 do
+				if allStrokes[i] and allStrokes[i].ref then
+					table.insert(newRefs, allStrokes[i].ref)
+				end
+			end
+		end
+		if #newRefs > 0 then
+			app.addToSelection(newRefs)
+		end
+
+		app.refreshPage()
+	end
+end
+
 function initUi()
 	app.registerUi({ menu = "Cycle Shapes", callback = "cycleShapes", accelerator = "<Alt>s" })
 
@@ -1026,4 +1225,5 @@ function initUi()
 	app.registerUi({ menu = "Shape: Table Make Square", callback = "makeTableSquare", accelerator = "<Alt>k" })
 	app.registerUi({ menu = "Shape: Toggle Wavy Line", callback = "toggleWavyLine", accelerator = "w" })
 	app.registerUi({ menu = "Shape: Toggle Arrows", callback = "toggleArrowLine", accelerator = "a" })
+	app.registerUi({ menu = "Shape: Toggle Curly Brace", callback = "toggleCurlyBrace", accelerator = "b" })
 end
