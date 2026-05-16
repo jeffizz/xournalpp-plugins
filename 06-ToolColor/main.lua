@@ -339,11 +339,62 @@ function textTool()
 	app.changeActionState("select-tool", app.C.Tool_text)
 	app.changeActionState("tool-color", toolColors["text"])
 end
+
 function penTool()
-	loadColorsConfig()
-	app.changeActionState("select-tool", app.C.Tool_pen)
-	app.changeActionState("tool-color", toolColors["pen"])
+	if type(loadColorsConfig) == "function" then
+		loadColorsConfig()
+	end
+
+	local success, sel = pcall(app.getStrokes, "selection")
+	local hasSelection = success and type(sel) == "table" and #sel > 0
+
+	local foundPen = false
+	local currentStyleName = "plain"
+
+	if hasSelection then
+		for _, stroke in ipairs(sel) do
+			if stroke.tool == "pen" then
+				foundPen = true
+				local s = stroke.lineStyle
+
+				if s == 0 or s == "plain" or s == "solid" then
+					currentStyleName = "plain"
+				elseif s == 1 or s == "dash" or s == "dashed" then
+					currentStyleName = "dash"
+				elseif s == 2 or s == "dot" or s == "dotted" then
+					currentStyleName = "dot"
+				elseif s == 3 or s == "dashdot" then
+					currentStyleName = "dashdot"
+				elseif type(s) == "string" and s ~= "" then
+					currentStyleName = s
+				end
+
+				break
+			end
+		end
+	end
+
+	if not foundPen then
+		app.changeActionState("select-tool", app.C.Tool_pen)
+		if toolColors and toolColors["pen"] then
+			app.changeActionState("tool-color", toolColors["pen"])
+		end
+		app.changeActionState("tool-pen-line-style", "plain")
+		return
+	end
+
+	local nextStyleMap = {
+		["plain"] = "dash",
+		["dash"] = "dashdot",
+		["dashdot"] = "dot",
+		["dot"] = "plain",
+	}
+
+	local nextStyle = nextStyleMap[currentStyleName] or "dash"
+
+	app.changeActionState("tool-pen-line-style", nextStyle)
 end
+
 function highlighterTool()
 	loadColorsConfig()
 	app.changeActionState("select-tool", app.C.Tool_highlighter)
