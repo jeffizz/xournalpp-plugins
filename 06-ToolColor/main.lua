@@ -359,18 +359,22 @@ function textTool()
 	end
 
 	local existingBorderStroke = nil
-	local existingBorderRef = nil
-	local hasBackground = false
+	local borderRef = nil
 
 	if hasStrokes then
 		for _, s in ipairs(selStrokes) do
 			if s.tool == "pen" and s.x and #s.x == 5 then
-				existingBorderStroke = s
-				existingBorderRef = s.ref
-				if s.fill and s.fill ~= 0 then
-					hasBackground = true
+				local isOurWidth = math.abs((s.width or 0) - 1.22) < 0.01
+				local isOrthogonal = math.abs(s.x[1] - s.x[4]) < 0.1
+					and math.abs(s.x[2] - s.x[3]) < 0.1
+					and math.abs(s.y[1] - s.y[2]) < 0.1
+					and math.abs(s.y[3] - s.y[4]) < 0.1
+
+				if isOurWidth and isOrthogonal then
+					existingBorderStroke = s
+					borderRef = s.ref
+					break
 				end
-				break
 			end
 		end
 	end
@@ -379,24 +383,18 @@ function textTool()
 
 	if existingBorderStroke then
 		app.clearSelection()
-		app.addToSelection({ existingBorderRef })
+		app.addToSelection({ borderRef })
 		app.activateAction("delete")
 
-		if not hasBackground then
-			local rectX = existingBorderStroke.x
-			local rectY = existingBorderStroke.y
-			local rectP = existingBorderStroke.pressure
-
-			local rgb = borderColor % 0x1000000
-
+		if not existingBorderStroke.fill or existingBorderStroke.fill == 0 then
 			app.addStrokes({
 				strokes = {
 					{
-						x = rectX,
-						y = rectY,
-						pressure = rectP,
+						x = existingBorderStroke.x,
+						y = existingBorderStroke.y,
+						pressure = existingBorderStroke.pressure,
 						tool = "pen",
-						width = 1.2,
+						width = 1.22,
 						color = borderColor,
 						fill = 60,
 						lineStyle = "plain",
@@ -405,22 +403,21 @@ function textTool()
 			})
 
 			local allStrokes = app.getStrokes("layer")
-			local newBorderRef = (type(allStrokes) == "table" and #allStrokes > 0) and allStrokes[#allStrokes].ref
-				or nil
-
-			app.clearSelection()
 			local newSel = textRefs
-			if newBorderRef then
-				table.insert(newSel, newBorderRef)
+			if type(allStrokes) == "table" and #allStrokes > 0 then
+				table.insert(newSel, allStrokes[#allStrokes].ref)
 			end
+			app.clearSelection()
 			app.addToSelection(newSel)
 		else
 			app.clearSelection()
 			app.addToSelection(textRefs)
 		end
-
 		app.refreshPage()
 	else
+		app.clearSelection()
+		app.addToSelection(textRefs)
+
 		local selInfo = app.getToolInfo("selection")
 		if not selInfo or not selInfo["snappedBounds"] then
 			return
@@ -444,7 +441,7 @@ function textTool()
 					y = rectY,
 					pressure = rectP,
 					tool = "pen",
-					width = 1.2,
+					width = 1.22,
 					color = borderColor,
 					fill = 0,
 					lineStyle = "plain",
@@ -461,6 +458,7 @@ function textTool()
 			table.insert(newSel, newBorderRef)
 		end
 		app.addToSelection(newSel)
+
 		app.refreshPage()
 	end
 end
