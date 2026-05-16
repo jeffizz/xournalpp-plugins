@@ -335,9 +335,134 @@ function hlSlot5()
 end
 
 function textTool()
-	loadColorsConfig()
-	app.changeActionState("select-tool", app.C.Tool_text)
-	app.changeActionState("tool-color", toolColors["text"])
+	if type(loadColorsConfig) == "function" then
+		loadColorsConfig()
+	end
+
+	local succT, selTexts = pcall(app.getTexts, "selection")
+	local succS, selStrokes = pcall(app.getStrokes, "selection")
+
+	local hasTexts = succT and type(selTexts) == "table" and #selTexts > 0
+	local hasStrokes = succS and type(selStrokes) == "table" and #selStrokes > 0
+
+	if not hasTexts then
+		app.changeActionState("select-tool", app.C.Tool_text)
+		if toolColors and toolColors["text"] then
+			app.changeActionState("tool-color", toolColors["text"])
+		end
+		return
+	end
+
+	local textRefs = {}
+	for _, txt in ipairs(selTexts) do
+		table.insert(textRefs, txt.ref)
+	end
+
+	local existingBorderStroke = nil
+	local existingBorderRef = nil
+	local hasBackground = false
+
+	if hasStrokes then
+		for _, s in ipairs(selStrokes) do
+			if s.tool == "pen" and s.x and #s.x == 5 then
+				existingBorderStroke = s
+				existingBorderRef = s.ref
+				if s.fill and s.fill ~= 0 then
+					hasBackground = true
+				end
+				break
+			end
+		end
+	end
+
+	local borderColor = selTexts[1].color or 0x000000
+
+	if existingBorderStroke then
+		app.clearSelection()
+		app.addToSelection({ existingBorderRef })
+		app.activateAction("delete")
+
+		if not hasBackground then
+			local rectX = existingBorderStroke.x
+			local rectY = existingBorderStroke.y
+			local rectP = existingBorderStroke.pressure
+
+			local rgb = borderColor % 0x1000000
+
+			app.addStrokes({
+				strokes = {
+					{
+						x = rectX,
+						y = rectY,
+						pressure = rectP,
+						tool = "pen",
+						width = 1.2,
+						color = borderColor,
+						fill = 60,
+						lineStyle = "plain",
+					},
+				},
+			})
+
+			local allStrokes = app.getStrokes("layer")
+			local newBorderRef = (type(allStrokes) == "table" and #allStrokes > 0) and allStrokes[#allStrokes].ref
+				or nil
+
+			app.clearSelection()
+			local newSel = textRefs
+			if newBorderRef then
+				table.insert(newSel, newBorderRef)
+			end
+			app.addToSelection(newSel)
+		else
+			app.clearSelection()
+			app.addToSelection(textRefs)
+		end
+
+		app.refreshPage()
+	else
+		local selInfo = app.getToolInfo("selection")
+		if not selInfo or not selInfo["snappedBounds"] then
+			return
+		end
+
+		local bounds = selInfo["snappedBounds"]
+		local pad = 2
+		local bx1 = bounds.x - pad
+		local by1 = bounds.y - pad
+		local bx2 = bounds.x + bounds.width + pad
+		local by2 = bounds.y + bounds.height + pad
+
+		local rectX = { bx1, bx2, bx2, bx1, bx1 }
+		local rectY = { by1, by1, by2, by2, by1 }
+		local rectP = { 1.0, 1.0, 1.0, 1.0, 1.0 }
+
+		app.addStrokes({
+			strokes = {
+				{
+					x = rectX,
+					y = rectY,
+					pressure = rectP,
+					tool = "pen",
+					width = 1.2,
+					color = borderColor,
+					fill = 0,
+					lineStyle = "plain",
+				},
+			},
+		})
+
+		local allStrokes = app.getStrokes("layer")
+		local newBorderRef = (type(allStrokes) == "table" and #allStrokes > 0) and allStrokes[#allStrokes].ref or nil
+
+		app.clearSelection()
+		local newSel = textRefs
+		if newBorderRef then
+			table.insert(newSel, newBorderRef)
+		end
+		app.addToSelection(newSel)
+		app.refreshPage()
+	end
 end
 
 function penTool()
