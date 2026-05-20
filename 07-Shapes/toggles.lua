@@ -280,7 +280,7 @@ function toggles.toggleArrowLine()
 					end
 					local nextState = (currentState + 1) % 4
 					local nx, ny, np = {}, {}, {}
-					local L = 8.0 + (stroke.width or 2.0) * 1.5
+					local L = 5.0 + (stroke.width or 2.0) * 1.5
 					local angle_offset = math.pi / 6
 					local atan2 = math.atan2 and math.atan2 or math.atan
 
