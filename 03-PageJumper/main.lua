@@ -1414,10 +1414,10 @@ function handleBacklinksDialogResult(selectedIndex)
 	end
 end
 
-function showPageMentions()
+local function prepareMentionsContext()
 	local doc = app.getDocumentStructure()
 	if not doc or not doc.pages then
-		return
+		return false
 	end
 
 	local db = fetchMetadata()
@@ -1446,7 +1446,7 @@ function showPageMentions()
 		end
 	end
 
-	local currentDisplayPage = getDisplayPage(doc.currentPage)
+	local currentDisplayPage, currentPrefix = getDisplayPage(doc.currentPage)
 
 	local outlineMap = {}
 	if pdfPath and pdfPath ~= "" and mutoolExec and mutoolExec ~= "" then
@@ -1556,15 +1556,11 @@ function showPageMentions()
 	table.insert(rankedMentions, 1, {
 		isCurrent = true,
 		displayPage = currentDisplayPage,
+		prefix = currentPrefix,
 		count = mentions[currentDisplayPage] and mentions[currentDisplayPage].count or 0,
 		title = outlineMap[currentDisplayPage] or "",
 		sources = mentions[currentDisplayPage] and mentions[currentDisplayPage].sources or {},
 	})
-
-	if #rankedMentions == 1 and rankedMentions[1].count == 0 then
-		showNote("🔍 No page references found in your notes.")
-		return
-	end
 
 	pendingJumpContext = {
 		origin = doc.currentPage,
@@ -1574,13 +1570,45 @@ function showPageMentions()
 		outlineMap = outlineMap,
 	}
 
-	renderPageMentionsDialog()
+	return true
+end
+
+function showPageMentions()
+	if prepareMentionsContext() then
+		if #pendingJumpContext.rankedMentions == 1 and pendingJumpContext.rankedMentions[1].count == 0 then
+			showNote("🔍 No page references found in your notes.")
+			pendingJumpContext = nil
+			return
+		end
+		renderPageMentionsDialog()
+	end
+end
+
+function showCurrentPageBacklinks()
+	if prepareMentionsContext() then
+		local currentItem = pendingJumpContext.rankedMentions[1]
+
+		if currentItem.count == 0 then
+			showNote("🔍 No pages mention the current page.")
+			pendingJumpContext = nil
+			return
+		end
+
+		pendingJumpContext.targetMention = currentItem
+		pendingJumpContext.backlinksDialogPage = 1
+		renderBacklinksDialog()
+	end
 end
 
 function initUi()
 	app.registerUi({ ["menu"] = "Teleport: Switch A/B", ["callback"] = "toggleTeleport", ["accelerator"] = "<Alt>w" })
 	app.registerUi({ ["menu"] = "Slot Manager", ["callback"] = "openSlotManager", ["accelerator"] = "<Shift>s" })
 	app.registerUi({ ["menu"] = "Page Mentions", ["callback"] = "showPageMentions", ["accelerator"] = "<Alt>m" })
+	app.registerUi({
+		["menu"] = "Page Backlinks",
+		["callback"] = "showCurrentPageBacklinks",
+		["accelerator"] = "<Alt>b",
+	})
 	app.registerUi({ ["menu"] = "PDF Outline", ["callback"] = "showPdfOutline", ["accelerator"] = "<Alt>a" })
 	app.registerUi({ ["menu"] = "Clipboard Search", ["callback"] = "searchAndJump", ["accelerator"] = "<Alt>f" })
 	app.registerUi({ ["menu"] = "Smart Jump", ["callback"] = "autoParseAndJump", ["accelerator"] = "<Alt>g" })
