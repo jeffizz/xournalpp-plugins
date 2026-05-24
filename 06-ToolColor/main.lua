@@ -588,6 +588,83 @@ function cycleToolColor()
 	app.changeActionState("tool-color", nextColor)
 end
 
+-- ============================================================================
+-- Toggle Fill
+-- ============================================================================
+function toggleFill()
+	local succ, sel = pcall(app.getStrokes, "selection")
+	if not succ or type(sel) ~= "table" or #sel == 0 then
+		app.clearSelection()
+		app.refreshPage()
+		return
+	end
+
+	local refsToDelete = {}
+	local newStrokes = {}
+	local CLOSE_THRESHOLD = 15.0
+
+	for _, s in ipairs(sel) do
+		if s.x and s.y and #s.x >= 3 and #s.x == #s.y then
+			local dx = s.x[1] - s.x[#s.x]
+			local dy = s.y[1] - s.y[#s.y]
+			local dist = math.sqrt(dx * dx + dy * dy)
+
+			if dist <= CLOSE_THRESHOLD then
+				table.insert(refsToDelete, s.ref)
+
+				local newFill = 60
+				if s.fill and s.fill == 60 then
+					newFill = 0
+				end
+
+				local newStroke = {
+					x = s.x,
+					y = s.y,
+					tool = s.tool or "pen",
+					width = s.width or 1.0,
+					color = s.color or 0x000000,
+					fill = newFill,
+					lineStyle = s.lineStyle or "plain",
+				}
+				if s.pressure then
+					newStroke.pressure = s.pressure
+				end
+				table.insert(newStrokes, newStroke)
+			end
+		end
+	end
+
+	if #refsToDelete == 0 then
+		app.clearSelection()
+		app.refreshPage()
+		return
+	end
+
+	app.clearSelection()
+	app.addToSelection(refsToDelete)
+	app.activateAction("delete")
+
+	app.addStrokes({ strokes = newStrokes })
+
+	local newLayerStrokes = app.getStrokes("layer")
+	local newSelection = {}
+	if type(newLayerStrokes) == "table" then
+		local currentCount = #newLayerStrokes
+		local addedCount = #newStrokes
+		for i = currentCount - addedCount + 1, currentCount do
+			if newLayerStrokes[i] then
+				table.insert(newSelection, newLayerStrokes[i].ref)
+			end
+		end
+	end
+
+	app.clearSelection()
+	if #newSelection > 0 then
+		app.addToSelection(newSelection)
+	end
+	app.refreshPage()
+end
+
 function initUi()
 	local db = config.read()
 	local enableShortcuts = true
@@ -607,7 +684,7 @@ function initUi()
 		app.registerUi({ ["menu"] = "Select PDF Text (s)", ["callback"] = "pdfTextTool", ["accelerator"] = "s" })
 		app.registerUi({ ["menu"] = "Highlighter Tool (d)", ["callback"] = "highlighterTool", ["accelerator"] = "d" })
 	end
-
+	app.registerUi({ ["menu"] = "Toggle Fill (f)", ["callback"] = "toggleFill", ["accelerator"] = "f" })
 	app.registerUi({
 		["menu"] = "ToolColor: Cycle Tool Color (c)",
 		["callback"] = "cycleToolColor",
