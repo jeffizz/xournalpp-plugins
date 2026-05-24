@@ -563,50 +563,137 @@ function toggleTeleport()
 	end
 end
 
-local function handleSlotAction(slot)
+function openSlotManager()
+	local doc = app.getDocumentStructure()
+	if not doc then
+		return
+	end
+
+	local current = doc.currentPage
 	local key = getFileKey()
-	local current = app.getDocumentStructure().currentPage
-	local now = os.clock()
-	local state = slotStates[slot]
-	if (now - state.lastTime) < 0.5 then
-		local targetToSave = state.originPage
-		if current ~= targetToSave then
-			app.scrollToPage(targetToSave, false)
-		end
-		if not savedPages[key] then
-			savedPages[key] = {}
-		end
-		if type(savedPages[key][0]) == "table" and #savedPages[key][0] > 0 then
-			if savedPages[key][0][#savedPages[key][0]] == targetToSave then
-				table.remove(savedPages[key][0])
+	local slots = savedPages[key] or {}
+
+	local db = fetchMetadata()
+	local mutoolExec = db["Common"] and db["Common"]["MutoolPath"]
+	local printedOffset = tonumber(db["PageJumpper"] and db["PageJumpper"]["PrintedOffset"]) or 0
+
+	local outlineMap = {}
+	local pdfPath = doc.pdfBackgroundFilename
+	if pdfPath and pdfPath ~= "" and mutoolExec and mutoolExec ~= "" then
+		local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
+		local safePath = '"' .. pdfPath:gsub('"', '\\"') .. '"'
+		local cmd =
+			string.format('"%s" show %s outline 2>%s', mutoolExec, safePath, os_name == "win" and "nul" or "/dev/null")
+		local f = io.popen(cmd, "r")
+		if f then
+			local output = f:read("*a")
+			f:close()
+			if output and output ~= "" then
+				for line in output:gmatch("[^\r\n]+") do
+					local symbol, indent, title, page = line:match('^([%+|%-])(%s*)"(.*)".-#page=(%d+)')
+					if symbol and title and page then
+						local displayPage = tonumber(page) - printedOffset
+						if not outlineMap[displayPage] then
+							outlineMap[displayPage] = title
+						end
+					end
+				end
 			end
-		end
-		savedPages[key][slot] = targetToSave
-		saveSavedPages()
-		showNote("✅ Slot " .. slot .. " Saved")
-		state.lastTime = 0
-	else
-		state.lastTime = now
-		state.originPage = current
-		if savedPages[key] and savedPages[key][slot] then
-			if not teleportStations[key] then
-				teleportStations[key] = { a = 0, b = 0 }
-			end
-			teleportStations[key].a = current
-			teleportStations[key].b = 0
-			scrollToPage(savedPages[key][slot])
 		end
 	end
+
+	local function getDisplayPage(internalPage)
+		if not internalPage or internalPage == 0 then
+			return nil
+		end
+		local pdfBgNo = doc.pages[internalPage] and doc.pages[internalPage].pdfBackgroundPageNo or 0
+		if pdfBgNo > 0 then
+			return pdfBgNo - printedOffset
+		end
+		return internalPage
+	end
+
+	local currentDisplayPage = getDisplayPage(current)
+
+	local msg = "📍 Teleport Slot Manager\n\n"
+	msg = msg
+		.. string.format(
+			"▶ Current Page: [P%s] %s\n\n",
+			tostring(currentDisplayPage),
+			outlineMap[currentDisplayPage] or "Unknown Chapter"
+		)
+
+	local dialogOptions = {}
+	local dialogTargets = {}
+
+	for i = 1, 3 do
+		local targetInternal = slots[i]
+
+		if targetInternal and targetInternal > 0 then
+			local targetDisplay = getDisplayPage(targetInternal)
+			table.insert(dialogOptions, string.format("🚀 (P%s)", tostring(targetDisplay)))
+			table.insert(dialogTargets, { action = "go", slot = i, target = targetInternal })
+
+			msg = msg
+				.. string.format("Slot %d: [P%s] %s\n", i, tostring(targetDisplay), outlineMap[targetDisplay] or "")
+		else
+			table.insert(dialogOptions, "⭕ (Empty)")
+			table.insert(dialogTargets, { action = "go", slot = i, target = 0 })
+
+			msg = msg .. string.format("Slot %d: (Empty)\n", i)
+		end
+
+		table.insert(dialogOptions, string.format("💾 Slot%d", i))
+		table.insert(dialogTargets, { action = "set", slot = i, target = current, display = currentDisplayPage })
+	end
+
+	table.insert(dialogOptions, "🚫 Cancel")
+	table.insert(dialogTargets, { action = "cancel" })
+
+	pendingJumpContext = { dialogTargets = dialogTargets, origin = current }
+	app.openDialog(msg, dialogOptions, "handleSlotManagerResult")
 end
 
-function slotAction1()
-	handleSlotAction(1)
-end
-function slotAction2()
-	handleSlotAction(2)
-end
-function slotAction3()
-	handleSlotAction(3)
+function handleSlotManagerResult(selectedIndex)
+	if not pendingJumpContext or not pendingJumpContext.dialogTargets or not selectedIndex then
+		return
+	end
+	local idx = tonumber(selectedIndex)
+	if not idx then
+		return
+	end
+
+	local targetInfo = pendingJumpContext.dialogTargets[idx] or pendingJumpContext.dialogTargets[idx + 1]
+
+	if not targetInfo or targetInfo.action == "cancel" then
+		pendingJumpContext = nil
+		return
+	end
+
+	if targetInfo.action == "go" and (not targetInfo.target or targetInfo.target == 0) then
+		pendingJumpContext = nil
+		return
+	end
+
+	local key = getFileKey()
+	if not savedPages[key] then
+		savedPages[key] = {}
+	end
+
+	if targetInfo.action == "go" then
+		if not teleportStations[key] then
+			teleportStations[key] = { a = 0, b = 0 }
+		end
+		teleportStations[key].a = pendingJumpContext.origin
+		teleportStations[key].b = targetInfo.target
+		scrollToPage(targetInfo.target)
+	elseif targetInfo.action == "set" then
+		savedPages[key][targetInfo.slot] = targetInfo.target
+		saveSavedPages()
+		showNote("✅ Slot " .. targetInfo.slot .. " has been set to [P" .. tostring(targetInfo.display) .. "]")
+	end
+
+	pendingJumpContext = nil
 end
 
 function gotoPage()
@@ -1092,9 +1179,7 @@ end
 
 function initUi()
 	app.registerUi({ ["menu"] = "Teleport: Switch A/B", ["callback"] = "toggleTeleport", ["accelerator"] = "<Alt>w" })
-	app.registerUi({ ["menu"] = "Slot 1 (Save/Go)", ["callback"] = "slotAction1", ["accelerator"] = "<Alt>1" })
-	app.registerUi({ ["menu"] = "Slot 2 (Save/Go)", ["callback"] = "slotAction2", ["accelerator"] = "<Alt>2" })
-	app.registerUi({ ["menu"] = "Slot 3 (Save/Go)", ["callback"] = "slotAction3", ["accelerator"] = "<Alt>3" })
+	app.registerUi({ ["menu"] = "Slot Manager", ["callback"] = "openSlotManager", ["accelerator"] = "<Shift>s" })
 	app.registerUi({ ["menu"] = "PDF Outline", ["callback"] = "showPdfOutline", ["accelerator"] = "<Alt>a" })
 	app.registerUi({ ["menu"] = "Clipboard Search", ["callback"] = "searchAndJump", ["accelerator"] = "<Alt>f" })
 	app.registerUi({ ["menu"] = "Smart Jump", ["callback"] = "autoParseAndJump", ["accelerator"] = "<Alt>g" })
