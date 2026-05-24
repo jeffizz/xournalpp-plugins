@@ -303,6 +303,7 @@ function handleJumpDialogResult(selectedIndex)
 			teleportStations[key] = { a = 0, b = 0 }
 		end
 		teleportStations[key].a = pendingJumpContext.origin
+		teleportStations[key].b = target
 		scrollToPage(target)
 	end
 
@@ -565,6 +566,7 @@ local function handleSlotAction(slot)
 				teleportStations[key] = { a = 0, b = 0 }
 			end
 			teleportStations[key].a = current
+			teleportStations[key].b = 0
 			scrollToPage(savedPages[key][slot])
 		end
 	end
@@ -927,6 +929,102 @@ function showPdfOutline()
 	renderOutlineDialog()
 end
 
+function insertChapterToc()
+	local doc = app.getDocumentStructure()
+	if not doc or not doc.pdfBackgroundFilename or doc.pdfBackgroundFilename == "" then
+		showNote("❌ No PDF background found.")
+		return
+	end
+
+	local db = fetchMetadata()
+	local mutoolExec = db["Common"] and db["Common"]["MutoolPath"]
+
+	if not mutoolExec or mutoolExec == "" then
+		showNote(
+			"⚠️ Mutool is not configured!\n\nPlease copy the mutool executable path to your clipboard, then use the menu:\n[Config from Clipboard (Path/Offset)]"
+		)
+		return
+	end
+
+	local printedOffset = tonumber(db["PageJumpper"] and db["PageJumpper"]["PrintedOffset"]) or 0
+	local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
+	local safePath = '"' .. doc.pdfBackgroundFilename:gsub('"', '\\"') .. '"'
+	local cmd =
+		string.format('"%s" show %s outline 2>%s', mutoolExec, safePath, os_name == "win" and "nul" or "/dev/null")
+
+	local f = io.popen(cmd, "r")
+	if not f then
+		showNote("❌ Failed to run mutool.")
+		return
+	end
+	local output = f:read("*a")
+	f:close()
+
+	if not output or output == "" then
+		showNote("🔍 No outline found in this PDF.")
+		return
+	end
+
+	local pdfToInternalMap = buildPdfToInternalMap(doc)
+	local tree = parseOutlineTree(output, printedOffset, pdfToInternalMap)
+	if #tree.children == 0 then
+		showNote("🔍 Outline is empty after parsing.")
+		return
+	end
+
+	local current = doc.currentPage
+	local currentChapter = nil
+
+	for i = #tree.children, 1, -1 do
+		local node = tree.children[i]
+		local startPg = node.targetPage or 0
+		if startPg > 0 and startPg <= current then
+			currentChapter = node
+			break
+		end
+	end
+
+	if not currentChapter and #tree.children > 0 then
+		currentChapter = tree.children[1]
+	end
+
+	if not currentChapter then
+		showNote("❌ Could not determine current chapter.")
+		return
+	end
+
+	local lines = {}
+	local function traverse(node, depth)
+		if node.title and node.displayPage then
+			local indent = string.rep("    ", depth)
+			table.insert(lines, string.format("%s[P%d] %s", indent, node.displayPage, node.title))
+		end
+		if node.children then
+			for _, child in ipairs(node.children) do
+				traverse(child, depth + 1)
+			end
+		end
+	end
+
+	traverse(currentChapter, 0)
+	local resultText = table.concat(lines, "\n")
+
+	local font = app.getFont()
+	app.addTexts({
+		texts = {
+			{
+				text = resultText,
+				x = 50,
+				y = 50,
+				color = 0x000000,
+				font = font,
+			},
+		},
+	})
+
+	app.refreshPage()
+end
+
 function loadSavedPages()
 	local file = io.open(dataFile, "r")
 	if file then
@@ -976,6 +1074,6 @@ function initUi()
 	app.registerUi({ ["menu"] = "Go to Page (g)", ["callback"] = "gotoPage", ["accelerator"] = "g" })
 	app.registerUi({ ["menu"] = "Config from Clipboard (Path/Offset)", ["callback"] = "processClipboardConfig" })
 	app.registerUi({ ["menu"] = "Debug: Page Info", ["callback"] = "showPageInfo" })
-
+	app.registerUi({ ["menu"] = "Insert Chapter TOC", ["callback"] = "insertChapterToc", ["accelerator"] = "<Alt>o" })
 	loadSavedPages()
 end
