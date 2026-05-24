@@ -447,9 +447,9 @@ function autoParseAndJump()
 	local current = doc.currentPage
 	local db = fetchMetadata()
 	local pdfPath = doc.pdfBackgroundFilename
-
 	local mode = 1
 	local printedOffset = 0
+	local mutoolExec = db["Common"] and db["Common"]["MutoolPath"]
 
 	if pdfPath and pdfPath ~= "" then
 		if db["PageJumpper"] and db["PageJumpper"]["PrintedOffset"] then
@@ -464,6 +464,30 @@ function autoParseAndJump()
 	if #nums == 0 then
 		showNote("🔍 No page markers found on the current page.")
 		return
+	end
+
+	local outlineMap = {}
+	if pdfPath and pdfPath ~= "" and mutoolExec and mutoolExec ~= "" then
+		local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
+		local safePath = '"' .. pdfPath:gsub('"', '\\"') .. '"'
+		local cmd =
+			string.format('"%s" show %s outline 2>%s', mutoolExec, safePath, os_name == "win" and "nul" or "/dev/null")
+		local f = io.popen(cmd, "r")
+		if f then
+			local output = f:read("*a")
+			f:close()
+			if output and output ~= "" then
+				for line in output:gmatch("[^\r\n]+") do
+					local symbol, indent, title, page = line:match('^([%+|%-])(%s*)"(.*)".-#page=(%d+)')
+					if symbol and title and page then
+						local displayPage = tonumber(page) - printedOffset
+						if not outlineMap[displayPage] then
+							outlineMap[displayPage] = title
+						end
+					end
+				end
+			end
+		end
 	end
 
 	local allTargets = {}
@@ -481,11 +505,14 @@ function autoParseAndJump()
 		end
 
 		if targetInternal then
-			table.insert(allTargets, {
-				label = string.format("P%d", n),
-				target = targetInternal,
-				pageNo = n,
-			})
+			local item =
+				{ label = string.format("P%d", n), target = targetInternal, pageNo = n, prefix = "P", snippet = "" }
+
+			if outlineMap[n] then
+				item.snippet = outlineMap[n]
+			end
+
+			table.insert(allTargets, item)
 		end
 	end
 
