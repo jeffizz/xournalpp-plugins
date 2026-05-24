@@ -1177,9 +1177,410 @@ function serializeTable(val)
 	end
 end
 
+function renderPageMentionsDialog()
+	if not pendingJumpContext or not pendingJumpContext.rankedMentions then
+		return
+	end
+
+	local items = pendingJumpContext.rankedMentions
+	local totalItems = #items
+	local totalPages = math.ceil(totalItems / ITEMS_PER_PAGE)
+	local p = pendingJumpContext.dialogPage
+
+	local startIdx = (p - 1) * ITEMS_PER_PAGE + 1
+	local endIdx = math.min(p * ITEMS_PER_PAGE, totalItems)
+
+	local dialogOptions = {}
+	local dialogTargets = {}
+
+	local message = "📊 Global Page Mentions:\n\n"
+	if totalPages > 1 then
+		message = message .. string.format("(Page %d/%d)\n\n", p, totalPages)
+	end
+
+	if p > 1 then
+		table.insert(dialogOptions, "⬅️ Prev")
+		table.insert(dialogTargets, "prev")
+	end
+
+	for i = startIdx, endIdx do
+		local item = items[i]
+		local pre = item.prefix or "P"
+
+		if item.isCurrent then
+			if item.count == 0 then
+				table.insert(dialogOptions, string.format("📍 %s%d (0)", pre, item.displayPage))
+				table.insert(dialogTargets, "cancel")
+				message = message .. string.format("[%s%d](0)\t%s📍\n", pre, item.displayPage, item.title)
+			else
+				table.insert(dialogOptions, string.format("📍 %s%d (%d)", pre, item.displayPage, item.count))
+				table.insert(dialogTargets, { action = "show_backlinks", item = item })
+				message = message
+					.. string.format("[%s%d](%d)\t%s📍\n", pre, item.displayPage, item.count, item.title)
+			end
+		else
+			table.insert(dialogOptions, string.format("%s%d (%d)", pre, item.displayPage, item.count))
+			table.insert(dialogTargets, { action = "jump", target = item.target })
+			message = message .. string.format("[%s%d](%d)\t%s\n", pre, item.displayPage, item.count, item.title)
+		end
+	end
+
+	if p < totalPages then
+		table.insert(dialogOptions, "Next ➡️")
+		table.insert(dialogTargets, "next")
+	end
+
+	table.insert(dialogOptions, "🚫 Cancel")
+	table.insert(dialogTargets, "cancel")
+
+	pendingJumpTargets = dialogTargets
+	app.openDialog(message, dialogOptions, "handlePageMentionsDialogResult")
+end
+
+function handlePageMentionsDialogResult(selectedIndex)
+	if not pendingJumpContext or not pendingJumpTargets or not selectedIndex then
+		return
+	end
+	local idx = tonumber(selectedIndex)
+	if not idx then
+		return
+	end
+
+	local target = pendingJumpTargets[idx] or pendingJumpTargets[idx + 1]
+
+	if target == "next" then
+		pendingJumpContext.dialogPage = pendingJumpContext.dialogPage + 1
+		renderPageMentionsDialog()
+	elseif target == "prev" then
+		pendingJumpContext.dialogPage = pendingJumpContext.dialogPage - 1
+		renderPageMentionsDialog()
+	elseif target == "cancel" then
+		pendingJumpContext = nil
+		pendingJumpTargets = nil
+	elseif type(target) == "table" then
+		if target.action == "jump" then
+			local key = getFileKey()
+			if not teleportStations[key] then
+				teleportStations[key] = { a = 0, b = 0 }
+			end
+			teleportStations[key].a = pendingJumpContext.origin
+			teleportStations[key].b = target.target
+			scrollToPage(target.target)
+			pendingJumpContext = nil
+			pendingJumpTargets = nil
+		elseif target.action == "show_backlinks" then
+			pendingJumpContext.targetMention = target.item
+			pendingJumpContext.backlinksDialogPage = 1
+			renderBacklinksDialog()
+		end
+	end
+end
+
+function renderBacklinksDialog()
+	if not pendingJumpContext or not pendingJumpContext.targetMention then
+		return
+	end
+
+	local sources = pendingJumpContext.targetMention.sources
+	local targetPageNum = pendingJumpContext.targetMention.displayPage
+	local targetPrefix = pendingJumpContext.targetMention.prefix or "P"
+	local totalItems = #sources
+	local totalPages = math.ceil(totalItems / ITEMS_PER_PAGE)
+	local p = pendingJumpContext.backlinksDialogPage
+
+	local startIdx = (p - 1) * ITEMS_PER_PAGE + 1
+	local endIdx = math.min(p * ITEMS_PER_PAGE, totalItems)
+
+	local pageTitles = {}
+	if totalItems > 0 then
+		local sourceSet = {}
+		for i = startIdx, endIdx do
+			sourceSet[sources[i]] = true
+		end
+
+		local allTexts = app.getTexts("all") or {}
+		for _, txtObj in pairs(allTexts) do
+			if type(txtObj) == "table" and sourceSet[txtObj.page] and txtObj.text then
+				if not pageTitles[txtObj.page] then
+					local pat1 = "%f[%w][Pp]age[ \t]*" .. targetPageNum .. "%f[%W]"
+					local pat2 = "%f[%w][Pp][ \t]*" .. targetPageNum .. "%f[%W]"
+
+					local start_idx, end_idx = txtObj.text:find(pat1)
+					if not start_idx then
+						start_idx, end_idx = txtObj.text:find(pat2)
+					end
+
+					if start_idx then
+						local clean = txtObj.text:sub(1, start_idx - 1) .. txtObj.text:sub(end_idx + 1)
+
+						clean = clean:gsub("[ \t\n\r]+", " ")
+						clean = clean:match("^[ \t\n\r]*(.-)[ \t\n\r]*$")
+
+						if clean and clean ~= "" then
+							pageTitles[txtObj.page] = clean
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local dialogOptions = {}
+	local dialogTargets = {}
+
+	local message = string.format(
+		"🔗 Backlinks for [%s%d] (%s):\n\n",
+		targetPrefix,
+		targetPageNum,
+		pendingJumpContext.targetMention.title
+	)
+	if totalPages > 1 then
+		message = message .. string.format("(Page %d/%d)\n\n", p, totalPages)
+	end
+
+	table.insert(dialogOptions, "⬆️ Back")
+	table.insert(dialogTargets, "back")
+
+	if p > 1 then
+		table.insert(dialogOptions, "⬅️ Prev")
+		table.insert(dialogTargets, "prev")
+	end
+
+	for i = startIdx, endIdx do
+		local xoPage = sources[i]
+		local displayP, pre = pendingJumpContext.getDisplayPage(xoPage)
+
+		local noteTitle = pageTitles[xoPage]
+		local title = noteTitle
+			or (pendingJumpContext.outlineMap and pendingJumpContext.outlineMap[displayP])
+			or "No title"
+
+		local preview = utf8sub(title, 1, 125)
+		if #title > 125 then
+			preview = preview .. "..."
+		end
+
+		table.insert(dialogOptions, string.format("%s%s", pre, tostring(displayP)))
+		table.insert(dialogTargets, { action = "jump", target = xoPage })
+
+		local marker = noteTitle and "📝 " or "📖 "
+		message = message .. string.format("▪ %s[%s%s] %s\n", marker, pre, tostring(displayP), preview)
+	end
+
+	if p < totalPages then
+		table.insert(dialogOptions, "Next ➡️")
+		table.insert(dialogTargets, "next")
+	end
+
+	table.insert(dialogOptions, "🚫 Cancel")
+	table.insert(dialogTargets, "cancel")
+
+	pendingJumpTargets = dialogTargets
+	app.openDialog(message, dialogOptions, "handleBacklinksDialogResult")
+end
+
+function handleBacklinksDialogResult(selectedIndex)
+	if not pendingJumpContext or not pendingJumpTargets or not selectedIndex then
+		return
+	end
+	local idx = tonumber(selectedIndex)
+	if not idx then
+		return
+	end
+
+	local target = pendingJumpTargets[idx] or pendingJumpTargets[idx + 1]
+
+	if target == "next" then
+		pendingJumpContext.backlinksDialogPage = pendingJumpContext.backlinksDialogPage + 1
+		renderBacklinksDialog()
+	elseif target == "prev" then
+		pendingJumpContext.backlinksDialogPage = pendingJumpContext.backlinksDialogPage - 1
+		renderBacklinksDialog()
+	elseif target == "back" then
+		renderPageMentionsDialog()
+	elseif target == "cancel" then
+		pendingJumpContext = nil
+		pendingJumpTargets = nil
+	elseif type(target) == "table" and target.action == "jump" then
+		local key = getFileKey()
+		if not teleportStations[key] then
+			teleportStations[key] = { a = 0, b = 0 }
+		end
+		teleportStations[key].a = pendingJumpContext.origin
+		teleportStations[key].b = target.target
+		scrollToPage(target.target)
+		pendingJumpContext = nil
+		pendingJumpTargets = nil
+	end
+end
+
+function showPageMentions()
+	local doc = app.getDocumentStructure()
+	if not doc or not doc.pages then
+		return
+	end
+
+	local db = fetchMetadata()
+	local pdfPath = doc.pdfBackgroundFilename
+	local mutoolExec = db["Common"] and db["Common"]["MutoolPath"]
+	local printedOffset = tonumber(db["PageJumpper"] and db["PageJumpper"]["PrintedOffset"]) or 0
+
+	local mode = 1
+	if pdfPath and pdfPath ~= "" then
+		if db["PageJumpper"] and db["PageJumpper"]["PrintedOffset"] then
+			mode = 3
+		else
+			mode = 2
+		end
+	end
+
+	local function getDisplayPage(internalPage)
+		if not internalPage or internalPage == 0 then
+			return internalPage, "X"
+		end
+		local bgNo = doc.pages[internalPage] and doc.pages[internalPage].pdfBackgroundPageNo or 0
+		if bgNo > 0 then
+			return bgNo - printedOffset, "P"
+		else
+			return internalPage, "X"
+		end
+	end
+
+	local currentDisplayPage = getDisplayPage(doc.currentPage)
+
+	local outlineMap = {}
+	if pdfPath and pdfPath ~= "" and mutoolExec and mutoolExec ~= "" then
+		local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
+		local safePath = '"' .. pdfPath:gsub('"', '\\"') .. '"'
+		local cmd =
+			string.format('"%s" show %s outline 2>%s', mutoolExec, safePath, os_name == "win" and "nul" or "/dev/null")
+		local f = io.popen(cmd, "r")
+		if f then
+			local output = f:read("*a")
+			f:close()
+			if output and output ~= "" then
+				for line in output:gmatch("[^\r\n]+") do
+					local symbol, indent, title, page = line:match('^([%+|%-])(%s*)"(.*)".-#page=(%d+)')
+					if symbol and title and page then
+						local displayPage = tonumber(page) - printedOffset
+						if not outlineMap[displayPage] then
+							outlineMap[displayPage] = title
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local pageAggregator = {}
+	local allTexts = app.getTexts("all") or {}
+
+	for _, txtObj in pairs(allTexts) do
+		if type(txtObj) == "table" and txtObj.text then
+			local sourceXoPage = txtObj.page
+
+			if not pageAggregator[sourceXoPage] then
+				pageAggregator[sourceXoPage] = { nums = {}, count = 0 }
+			end
+
+			local function collectLocal(n)
+				table.insert(pageAggregator[sourceXoPage].nums, n)
+				pageAggregator[sourceXoPage].count = pageAggregator[sourceXoPage].count + 1
+			end
+
+			for numStr in txtObj.text:gmatch("%f[%w][Pp]age[ \t]*(%d+)") do
+				collectLocal(tonumber(numStr))
+			end
+			for numStr in txtObj.text:gmatch("%f[%w][Pp][ \t]*(%d+)") do
+				collectLocal(tonumber(numStr))
+			end
+		end
+	end
+
+	local TOC_THRESHOLD = 15
+	local mentions = {}
+
+	for p, data in pairs(pageAggregator) do
+		if data.count > 0 and data.count <= TOC_THRESHOLD then
+			for _, n in ipairs(data.nums) do
+				if not mentions[n] then
+					mentions[n] = { count = 0, sources = {}, sourceSet = {} }
+				end
+				mentions[n].count = mentions[n].count + 1
+
+				if not mentions[n].sourceSet[p] then
+					mentions[n].sourceSet[p] = true
+					table.insert(mentions[n].sources, p)
+				end
+			end
+		end
+	end
+
+	local pdfToInternalMap = buildPdfToInternalMap(doc)
+	local rankedMentions = {}
+
+	for n, data in pairs(mentions) do
+		if n ~= currentDisplayPage then
+			local targetInternal = nil
+			if mode == 1 then
+				if n > 0 and n <= #doc.pages then
+					targetInternal = n
+				end
+			else
+				local targetPdfNo = (mode == 3) and (n + printedOffset) or n
+				targetInternal = pdfToInternalMap[targetPdfNo]
+			end
+
+			if targetInternal then
+				local _, targetPrefix = getDisplayPage(targetInternal)
+
+				table.insert(rankedMentions, {
+					displayPage = n,
+					prefix = targetPrefix,
+					target = targetInternal,
+					count = data.count,
+					title = outlineMap[n] or "N/A",
+					sources = data.sources,
+				})
+			end
+		end
+	end
+
+	table.sort(rankedMentions, function(a, b)
+		if a.count == b.count then
+			return a.displayPage < b.displayPage
+		end
+		return a.count > b.count
+	end)
+
+	table.insert(rankedMentions, 1, {
+		isCurrent = true,
+		displayPage = currentDisplayPage,
+		count = mentions[currentDisplayPage] and mentions[currentDisplayPage].count or 0,
+		title = outlineMap[currentDisplayPage] or "",
+		sources = mentions[currentDisplayPage] and mentions[currentDisplayPage].sources or {},
+	})
+
+	if #rankedMentions == 1 and rankedMentions[1].count == 0 then
+		showNote("🔍 No page references found in your notes.")
+		return
+	end
+
+	pendingJumpContext = {
+		origin = doc.currentPage,
+		rankedMentions = rankedMentions,
+		dialogPage = 1,
+		getDisplayPage = getDisplayPage,
+		outlineMap = outlineMap,
+	}
+
+	renderPageMentionsDialog()
+end
+
 function initUi()
 	app.registerUi({ ["menu"] = "Teleport: Switch A/B", ["callback"] = "toggleTeleport", ["accelerator"] = "<Alt>w" })
 	app.registerUi({ ["menu"] = "Slot Manager", ["callback"] = "openSlotManager", ["accelerator"] = "<Shift>s" })
+	app.registerUi({ ["menu"] = "Page Mentions", ["callback"] = "showPageMentions", ["accelerator"] = "<Alt>m" })
 	app.registerUi({ ["menu"] = "PDF Outline", ["callback"] = "showPdfOutline", ["accelerator"] = "<Alt>a" })
 	app.registerUi({ ["menu"] = "Clipboard Search", ["callback"] = "searchAndJump", ["accelerator"] = "<Alt>f" })
 	app.registerUi({ ["menu"] = "Smart Jump", ["callback"] = "autoParseAndJump", ["accelerator"] = "<Alt>g" })
