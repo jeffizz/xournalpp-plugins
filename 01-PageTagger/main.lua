@@ -12,9 +12,6 @@ end
 function browseOrNextTag()
 	actions.browseOrNextTag()
 end
-function addDateTag()
-	actions.addDateTag()
-end
 function addVocabTag()
 	actions.addVocabTag()
 end
@@ -73,7 +70,6 @@ function initUi()
 	app.registerUi({ menu = "Tagger: Delete Tag", callback = "deleteTagUI", accelerator = "<Ctrl>d" })
 	app.registerUi({ menu = "Tagger: Browse Full Book", callback = "browseOrNextTag", accelerator = "<Ctrl>f" })
 	app.registerUi({ menu = "Tagger: Browse Chapter", callback = "browseChapterTags", accelerator = "<Ctrl>r" })
-	app.registerUi({ menu = "Tagger: Add Date", callback = "addDateTag", accelerator = "<Alt>d" })
 	app.registerUi({
 		menu = "Tagger: Add Vocab",
 		callback = "addVocabTag",

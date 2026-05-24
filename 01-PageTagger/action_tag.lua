@@ -176,11 +176,6 @@ function action_tag.addTagAndNote()
 	helpers.renderPageLabels(pageNo, data)
 end
 
-function action_tag.addDateTag()
-	local today = os.date("%Y%m%d")
-	applyQuickTag(today, nil)
-end
-
 function action_tag.deleteTagUI()
 	local doc = app.getDocumentStructure()
 	local pageNo = doc.currentPage
