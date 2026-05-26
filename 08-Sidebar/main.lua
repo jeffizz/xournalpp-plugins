@@ -1,7 +1,8 @@
-local DELIMITER = "\n\n🚀========== SIDEBAR ENTRY ==========\n\n"
 sidebarContext = nil
 
 local ICON_SIZE = 45
+local FOOTER_MARKER = ":::#SIDEBAR#:::"
+local DELIMITER = "\n\n🚀========== SIDEBAR ENTRY ==========\n\n"
 
 local function getCenter()
 	local doc = app.getDocumentStructure()
@@ -39,7 +40,7 @@ local function generateSidebarSvg(readCount, payload, stashCount)
 
   <text x="65" y="89" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FF5555" text-anchor="middle">]] .. readCountStr .. [[</text>
 
-  <desc id="sidebar-meta">:::COUNT:::]] .. tostring(readCount) .. [[:::ENDCOUNT::::::S1D3B4R:::]] .. payload .. [[:::END:::</desc>
+  <desc id="sidebar-meta">:::COUNT:::]] .. tostring(readCount) .. [[:::ENDCOUNT::::::S1D3B4R:::]] .. payload .. [[:::END:::]] .. FOOTER_MARKER .. [[</desc>
 </svg>]]
 end
 
@@ -47,6 +48,11 @@ local function extractSidebarMeta(imgData)
 	if type(imgData) ~= "string" then
 		return nil, 0
 	end
+
+	if not string.find(imgData, FOOTER_MARKER, -100, true) then
+		return nil, 0
+	end
+
 	local payload = nil
 	local count = 0
 
