@@ -4,6 +4,18 @@ sidebarDeleteContext = nil
 
 local ICON_SIZE = 45
 
+local function getCenter()
+	local doc = app.getDocumentStructure()
+	if not doc or not doc.pages then
+		return 297, 421
+	end
+	local pageNo = doc.currentPage
+	local page = doc.pages[pageNo]
+	local w = page.pageWidth or 595
+	local h = page.pageHeight or 842
+	return w / 2, h / 2
+end
+
 local function generateSidebarSvg(count, payload)
 	local countStr = count > 0 and tostring(count) or ""
 
@@ -53,22 +65,20 @@ local function extractSidebarMeta(imgData)
 	return payload, count
 end
 
-local function findSidebarSVG(doc, currentLayerId)
-	local allImages = app.getImages("page") or {}
+local function findSidebarSVG()
+	local allImages = app.getImages("layer") or {}
 	local targetImgRef, targetImgX, targetImgY = nil, nil, nil
 	local rawText, currentCount = "", 0
 
 	for _, img in ipairs(allImages) do
-		if img.layer == currentLayerId then
-			local payload, count = extractSidebarMeta(img.data)
-			if payload then
-				rawText = rawText .. payload
-				targetImgRef = img.ref
-				targetImgX = img.x
-				targetImgY = img.y
-				currentCount = count
-				break
-			end
+		local payload, count = extractSidebarMeta(img.data)
+		if payload then
+			rawText = rawText .. payload
+			targetImgRef = img.ref
+			targetImgX = img.x
+			targetImgY = img.y
+			currentCount = count
+			break
 		end
 	end
 	return targetImgRef, targetImgX, targetImgY, rawText, currentCount
@@ -418,9 +428,7 @@ local function parseChunk(chunkText)
 end
 
 incrementBadgeCount = function()
-	local doc = app.getDocumentStructure()
-	local currentLayerId = doc.pages[doc.currentPage].currentLayer
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG(doc, currentLayerId)
+	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
 
 	if not targetImgRef then
 		return
@@ -449,24 +457,20 @@ incrementBadgeCount = function()
 end
 
 function stashSidebar()
-	local doc = app.getDocumentStructure()
-	if not doc or not doc.pages then
-		return
-	end
-	local currentLayerId = doc.pages[doc.currentPage].currentLayer
-
 	local clipObj = getSmartClipboardData()
 	if not clipObj then
 		return showNote("❌ Clipboard is empty. Please copy some text or image first.")
 	end
 
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG(doc, currentLayerId)
+	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
 
+	local chunkCount = 0
 	if rawText ~= "" then
 		local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
 		for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
 			local clean = chunk:match("^%s*(.-)%s*$")
 			if clean and clean ~= "" then
+				chunkCount = chunkCount + 1
 				local parsed = parseChunk(clean)
 				if parsed.type == clipObj.type then
 					if parsed.type == "image" then
@@ -483,6 +487,10 @@ function stashSidebar()
 		end
 	end
 
+	if chunkCount >= 8 then
+		return showNote("⚠️ Sidebar is full (maximum 8 items). Please delete some items first.")
+	end
+
 	local textToStash = ""
 	if clipObj.type == "image" then
 		textToStash = "IMG:B64:" .. fastB64Encode(clipObj.data)
@@ -496,8 +504,14 @@ function stashSidebar()
 		app.activateAction("delete")
 	end
 
-	local finalX = targetImgX or 20
-	local finalY = targetImgY or 20
+	local finalX = targetImgX
+	local finalY = targetImgY
+
+	if not finalX or not finalY then
+		local cx, cy = getCenter()
+		finalX = cx - (ICON_SIZE / 2)
+		finalY = cy - (ICON_SIZE / 2)
+	end
 
 	app.addImages({
 		images = {
@@ -513,18 +527,16 @@ function stashSidebar()
 		allowUndoRedoAction = "none",
 	})
 
+	if chunkCount > 0 then
+		app.clearSelection()
+	end
+
 	app.refreshPage()
 	showNote(clipObj.type == "image" and "✅ Image stored in Sidebar!" or "✅ Text stored in Sidebar!")
 end
 
 function recallSidebar()
-	local doc = app.getDocumentStructure()
-	if not doc or not doc.pages then
-		return
-	end
-	local currentLayerId = doc.pages[doc.currentPage].currentLayer
-
-	local _, _, _, rawText, _ = findSidebarSVG(doc, currentLayerId)
+	local _, _, _, rawText, _ = findSidebarSVG()
 	if rawText == "" then
 		return showNote("📭 Sidebar is empty.")
 	end
@@ -583,15 +595,9 @@ function handleSidebarCallback(selectedIndex)
 end
 
 function purgeSidebar()
-	local doc = app.getDocumentStructure()
-	if not doc or not doc.pages then
-		return
-	end
-	local currentLayerId = doc.pages[doc.currentPage].currentLayer
-
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG(doc, currentLayerId)
+	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
 	if not targetImgRef then
-		return showNote("📭 No Sidebar found on this page.")
+		return showNote("📭 No Sidebar found on this layer.")
 	end
 
 	local chunks = {}
@@ -677,6 +683,7 @@ function handleDeleteSidebarCallback(selectedIndex)
 			},
 			allowUndoRedoAction = "none",
 		})
+		app.clearSelection()
 	end
 
 	app.refreshPage()
