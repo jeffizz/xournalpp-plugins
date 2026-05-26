@@ -529,7 +529,7 @@ function toggleTeleport()
 	local key = getFileKey()
 	local current = app.getDocumentStructure().currentPage
 	local now = os.clock()
-	if (now - lastClickTime) < 0.2 then
+	if (now - lastClickTime) < 0.1 then
 		teleportStations[key] = nil
 		showNote("Teleport Points Reset")
 		lastClickTime = 0
@@ -719,10 +719,11 @@ function showPageInfo()
 	local config = page.pageTypeConfig or "Unknown"
 	local bgColor = page.backgroundColor or "Unknown"
 	local pdfBgPage = page.pdfBackgroundPageNo or 0
+	local pdfPath = doc.pdfBackgroundFilename or "Unknown"
 
 	showNote(
 		string.format(
-			"📄 Page: %d / %d\n🖼️ pdfPageNo: %s\n🛠️ Mutool: %s\n📏 Size: %s x %s\n📝 Format: %s\n🎨 BgColor: %s",
+			"📄 Page: %d / %d\n🖼️ pdfPageNo: %s\n🛠️ Mutool: %s\n📏 Size: %s x %s\n📝 Format: %s\n🎨 BgColor: %s\n📁Path:%s",
 			pageNo,
 			#doc.pages,
 			tostring(pdfBgPage),
@@ -730,7 +731,8 @@ function showPageInfo()
 			tostring(width),
 			tostring(height),
 			tostring(format),
-			tostring(bgColor)
+			tostring(bgColor),
+			tostring(pdfPath)
 		)
 	)
 end
@@ -1602,7 +1604,7 @@ end
 
 function initUi()
 	app.registerUi({ ["menu"] = "Teleport: Switch A/B", ["callback"] = "toggleTeleport", ["accelerator"] = "<Alt>w" })
-	app.registerUi({ ["menu"] = "Slot Manager", ["callback"] = "openSlotManager", ["accelerator"] = "<Shift>s" })
+	app.registerUi({ ["menu"] = "Slot Manager", ["callback"] = "openSlotManager", ["accelerator"] = "<Alt>d" })
 	app.registerUi({ ["menu"] = "Page Mentions", ["callback"] = "showPageMentions", ["accelerator"] = "<Alt>m" })
 	app.registerUi({
 		["menu"] = "Page Backlinks",
