@@ -1,6 +1,5 @@
 local DELIMITER = "\n\n🚀========== SIDEBAR ENTRY ==========\n\n"
 sidebarContext = nil
-sidebarDeleteContext = nil
 
 local ICON_SIZE = 45
 
@@ -16,8 +15,9 @@ local function getCenter()
 	return w / 2, h / 2
 end
 
-local function generateSidebarSvg(count, payload)
-	local countStr = count > 0 and tostring(count) or ""
+local function generateSidebarSvg(readCount, payload, stashCount)
+	local readCountStr = readCount > 0 and tostring(readCount) or "0"
+	local stashCountStr = stashCount > 0 and tostring(stashCount) or "0"
 
 	return [[<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
@@ -28,14 +28,18 @@ local function generateSidebarSvg(count, payload)
   <line x1="4" y1="34" x2="96" y2="34" stroke="#000000" stroke-width="4"/>
   <line x1="35" y1="34" x2="35" y2="98" stroke="#000000" stroke-width="4"/>
 
+  <line x1="35" y1="66" x2="96" y2="66" stroke="#000000" stroke-width="4"/>
+
   <text x="50" y="26" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="black" text-anchor="middle">sidebar</text>
 
   <line x1="4" y1="55" x2="25" y2="55" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
   <line x1="10" y1="75" x2="25" y2="75" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
 
-  <text x="65" y="75" font-family="sans-serif" font-size="30" font-weight="bold" fill="#FF0002" text-anchor="middle">]] .. countStr .. [[</text>
+  <text x="65" y="57" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FF5555" text-anchor="middle">]] .. stashCountStr .. [[</text>
 
-  <desc id="sidebar-meta">:::COUNT:::]] .. tostring(count) .. [[:::ENDCOUNT::::::S1D3C4R:::]] .. payload .. [[:::END:::</desc>
+  <text x="65" y="89" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FF5555" text-anchor="middle">]] .. readCountStr .. [[</text>
+
+  <desc id="sidebar-meta">:::COUNT:::]] .. tostring(readCount) .. [[:::ENDCOUNT::::::S1D3B4R:::]] .. payload .. [[:::END:::</desc>
 </svg>]]
 end
 
@@ -46,7 +50,7 @@ local function extractSidebarMeta(imgData)
 	local payload = nil
 	local count = 0
 
-	local ps, pe = string.find(imgData, ":::S1D3C4R:::", 1, true)
+	local ps, pe = string.find(imgData, ":::S1D3B4R:::", 1, true)
 	if ps then
 		local pend = string.find(imgData, ":::END:::", pe + 1, true)
 		if pend then
@@ -82,6 +86,27 @@ local function findSidebarSVG()
 		end
 	end
 	return targetImgRef, targetImgX, targetImgY, rawText, currentCount
+end
+
+local function getChunks(rawText)
+	local chunks = {}
+	if not rawText or rawText == "" then
+		return chunks
+	end
+	local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+	for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
+		local clean = chunk:match("^%s*(.-)%s*$")
+		if clean and clean ~= "" then
+			table.insert(chunks, clean)
+		end
+	end
+	if #chunks == 0 then
+		local clean = rawText:match("^%s*(.-)%s*$")
+		if clean and clean ~= "" then
+			table.insert(chunks, clean)
+		end
+	end
+	return chunks
 end
 
 local function getByteCount(byte)
@@ -429,10 +454,11 @@ end
 
 incrementBadgeCount = function()
 	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
-
 	if not targetImgRef then
 		return
 	end
+
+	local chunks = getChunks(rawText)
 
 	app.clearSelection()
 	app.addToSelection({ targetImgRef })
@@ -441,7 +467,7 @@ incrementBadgeCount = function()
 	app.addImages({
 		images = {
 			{
-				data = generateSidebarSvg(currentCount + 1, rawText),
+				data = generateSidebarSvg(currentCount + 1, rawText, #chunks),
 				x = targetImgX,
 				y = targetImgY,
 				maxWidth = ICON_SIZE,
@@ -463,32 +489,41 @@ function stashSidebar()
 	end
 
 	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
+	local chunks = getChunks(rawText)
+	local totalImageSize = 0
 
-	local chunkCount = 0
-	if rawText ~= "" then
-		local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-		for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
-			local clean = chunk:match("^%s*(.-)%s*$")
-			if clean and clean ~= "" then
-				chunkCount = chunkCount + 1
-				local parsed = parseChunk(clean)
-				if parsed.type == clipObj.type then
-					if parsed.type == "image" then
-						if extractPngIdat(parsed.data) == extractPngIdat(clipObj.data) then
-							return showNote("⚠️ This image is already stored. Duplicate rejected.")
-						end
-					else
-						if parsed.data == clipObj.data then
-							return showNote("⚠️ This text is already stored. Duplicate rejected.")
-						end
-					end
+	for _, chunk in ipairs(chunks) do
+		local parsed = parseChunk(chunk)
+		if parsed.type == "image" then
+			totalImageSize = totalImageSize + #parsed.data
+		end
+
+		if parsed.type == clipObj.type then
+			if parsed.type == "image" then
+				if extractPngIdat(parsed.data) == extractPngIdat(clipObj.data) then
+					return showNote("⚠️ This image is already stored. Duplicate rejected.")
+				end
+			else
+				if parsed.data == clipObj.data then
+					return showNote("⚠️ This text is already stored. Duplicate rejected.")
 				end
 			end
 		end
 	end
 
-	if chunkCount >= 8 then
-		return showNote("⚠️ Sidebar is full (maximum 8 items). Please delete some items first.")
+	if clipObj.type == "image" then
+		if #clipObj.data > 1 * 1024 * 1024 then
+			return showNote("⚠️ Single image limit exceeded: Image cannot be larger than 1MB.")
+		end
+		totalImageSize = totalImageSize + #clipObj.data
+	end
+
+	if totalImageSize > 3 * 1024 * 1024 then
+		return showNote("⚠️ Storage limit exceeded: Total image size cannot exceed 5MB.")
+	end
+
+	if #chunks >= 20 then
+		return showNote("⚠️ Sidebar is full (maximum 20 items). Please delete some items first.")
 	end
 
 	local textToStash = ""
@@ -516,7 +551,7 @@ function stashSidebar()
 	app.addImages({
 		images = {
 			{
-				data = generateSidebarSvg(currentCount, rawText .. textToStash .. DELIMITER),
+				data = generateSidebarSvg(currentCount, rawText .. textToStash .. DELIMITER, #chunks + 1),
 				x = finalX,
 				y = finalY,
 				maxWidth = ICON_SIZE,
@@ -527,7 +562,7 @@ function stashSidebar()
 		allowUndoRedoAction = "none",
 	})
 
-	if chunkCount > 0 then
+	if #chunks > 0 then
 		app.clearSelection()
 	end
 
@@ -535,63 +570,71 @@ function stashSidebar()
 	showNote(clipObj.type == "image" and "✅ Image stored in Sidebar!" or "✅ Text stored in Sidebar!")
 end
 
+local function showPaginatedDialog(action, chunks, page, meta)
+	local ITEMS_PER_PAGE = 7
+	local startIdx = (page - 1) * ITEMS_PER_PAGE + 1
+	local endIdx = math.min(startIdx + ITEMS_PER_PAGE - 1, #chunks)
+
+	local msg = ""
+	if action == "recall" then
+		msg = string.format("📚 Sidebar contains the following items (Page %d):\n\n", page)
+	else
+		msg = string.format("🗑️ Select an item to delete (Page %d):\n\n", page)
+	end
+
+	local dialogOptions = {}
+	sidebarContext = {
+		action = action,
+		chunks = chunks,
+		page = page,
+		meta = meta,
+		dialogMap = {},
+	}
+
+	for i = startIdx, endIdx do
+		local parsed = parseChunk(chunks[i])
+		local preview = parsed.type == "image"
+				and string.format("🖼️ [Image] - %d KB", math.floor(#parsed.data / 1024))
+			or (utf8sub(parsed.data:gsub("[\r\n\t]+", " "), 1, 25) .. "...")
+
+		if action == "recall" then
+			table.insert(dialogOptions, "📋 Item " .. i)
+		else
+			table.insert(dialogOptions, "🗑️ Delete " .. i)
+		end
+		msg = msg .. string.format("[%d] %s\n", i, preview)
+		sidebarContext.dialogMap[#dialogOptions] = { type = "item", index = i, parsed = parsed }
+	end
+
+	if page > 1 then
+		table.insert(dialogOptions, "⬅️ Prev Page")
+		sidebarContext.dialogMap[#dialogOptions] = { type = "prev" }
+	end
+
+	if endIdx < #chunks then
+		table.insert(dialogOptions, "➡️ Next Page")
+		sidebarContext.dialogMap[#dialogOptions] = { type = "next" }
+	end
+
+	table.insert(dialogOptions, "🚫 Cancel")
+	sidebarContext.dialogMap[#dialogOptions] = { type = "cancel" }
+
+	app.openDialog(msg, dialogOptions, "handlePaginatedCallback", false)
+end
+
 function recallSidebar()
 	local _, _, _, rawText, _ = findSidebarSVG()
-	if rawText == "" then
+	local chunks = getChunks(rawText)
+
+	if #chunks == 0 then
 		return showNote("📭 Sidebar is empty.")
 	end
 
-	local chunks = {}
-	local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-	for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
-		local clean = chunk:match("^%s*(.-)%s*$")
-		if clean and clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
-	if #chunks == 0 then
-		local clean = rawText:match("^%s*(.-)%s*$")
-		if clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
-
-	if #chunks == 0 then
-		return
-	end
 	if #chunks == 1 then
 		return triggerRecallAction(parseChunk(chunks[1]))
 	end
 
-	local dialogOptions, msg = {}, "📚 Sidebar contains the following items:\n\n"
-	sidebarContext = {}
-	for i, chunk in ipairs(chunks) do
-		local parsed = parseChunk(chunk)
-		local preview = parsed.type == "image"
-				and string.format("🖼️ [Image] - %d KB", math.floor(#parsed.data / 1024))
-			or (utf8sub(parsed.data:gsub("[\r\n\t]+", " "), 1, 25) .. "...")
-		table.insert(dialogOptions, "📋 Item " .. i)
-		table.insert(sidebarContext, parsed)
-		msg = msg .. string.format("[%d] %s\n", i, preview)
-	end
-	table.insert(dialogOptions, "🚫 Cancel")
-	table.insert(sidebarContext, "cancel")
-	app.openDialog(msg, dialogOptions, "handleSidebarCallback", false)
-end
-
-function handleSidebarCallback(selectedIndex)
-	if not sidebarContext or not selectedIndex then
-		return
-	end
-	local idx = tonumber(selectedIndex)
-	if not idx then
-		return
-	end
-	local parsedObj = sidebarContext[idx] or sidebarContext[idx + 1]
-	if parsedObj and parsedObj ~= "cancel" then
-		triggerRecallAction(parsedObj)
-	end
-	sidebarContext = nil
+	showPaginatedDialog("recall", chunks, 1, nil)
 end
 
 function purgeSidebar()
@@ -600,20 +643,7 @@ function purgeSidebar()
 		return showNote("📭 No Sidebar found on this layer.")
 	end
 
-	local chunks = {}
-	local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-	for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
-		local clean = chunk:match("^%s*(.-)%s*$")
-		if clean and clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
-	if #chunks == 0 then
-		local clean = rawText:match("^%s*(.-)%s*$")
-		if clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
+	local chunks = getChunks(rawText)
 
 	if #chunks <= 1 then
 		app.clearSelection()
@@ -624,71 +654,79 @@ function purgeSidebar()
 		return
 	end
 
-	local dialogOptions, msg = {}, "🗑️ Select an item to delete:\n\n"
-	sidebarDeleteContext = {
-		chunks = chunks,
+	showPaginatedDialog("purge", chunks, 1, {
 		imgRef = targetImgRef,
 		imgX = targetImgX,
 		imgY = targetImgY,
 		currentCount = currentCount,
-	}
-
-	for i, chunk in ipairs(chunks) do
-		local parsed = parseChunk(chunk)
-		local preview = parsed.type == "image"
-				and string.format("🖼️ [Image] - %d KB", math.floor(#parsed.data / 1024))
-			or (utf8sub(parsed.data:gsub("[\r\n\t]+", " "), 1, 25) .. "...")
-		table.insert(dialogOptions, "🗑️ Delete " .. i)
-		msg = msg .. string.format("[%d] %s\n", i, preview)
-	end
-	table.insert(dialogOptions, "🚫 Cancel")
-	app.openDialog(msg, dialogOptions, "handleDeleteSidebarCallback", false)
+	})
 end
 
-function handleDeleteSidebarCallback(selectedIndex)
-	if not sidebarDeleteContext or not selectedIndex then
+function handlePaginatedCallback(selectedIndex)
+	if not sidebarContext or not selectedIndex then
+		sidebarContext = nil
 		return
 	end
+
 	local idx = tonumber(selectedIndex)
 	if not idx then
-		return
-	end
-	if idx > #sidebarDeleteContext.chunks then
-		sidebarDeleteContext = nil
+		sidebarContext = nil
 		return
 	end
 
-	local chunks = sidebarDeleteContext.chunks
-	table.remove(chunks, idx)
-
-	app.clearSelection()
-	app.addToSelection({ sidebarDeleteContext.imgRef })
-	app.activateAction("delete")
-
-	local combinedText = ""
-	for _, chunk in ipairs(chunks) do
-		combinedText = combinedText .. chunk .. DELIMITER
-	end
-	if combinedText ~= "" then
-		app.addImages({
-			images = {
-				{
-					data = generateSidebarSvg(sidebarDeleteContext.currentCount, combinedText),
-					x = sidebarDeleteContext.imgX,
-					y = sidebarDeleteContext.imgY,
-					maxWidth = ICON_SIZE,
-					maxHeight = ICON_SIZE,
-					aspectRatio = true,
-				},
-			},
-			allowUndoRedoAction = "none",
-		})
-		app.clearSelection()
+	local mapEntry = sidebarContext.dialogMap[idx] or sidebarContext.dialogMap[idx + 1]
+	if not mapEntry then
+		sidebarContext = nil
+		return
 	end
 
-	app.refreshPage()
-	showNote("✂️ Item deleted.")
-	sidebarDeleteContext = nil
+	if mapEntry.type == "cancel" then
+		sidebarContext = nil
+		return
+	elseif mapEntry.type == "prev" then
+		showPaginatedDialog(sidebarContext.action, sidebarContext.chunks, sidebarContext.page - 1, sidebarContext.meta)
+	elseif mapEntry.type == "next" then
+		showPaginatedDialog(sidebarContext.action, sidebarContext.chunks, sidebarContext.page + 1, sidebarContext.meta)
+	elseif mapEntry.type == "item" then
+		if sidebarContext.action == "recall" then
+			triggerRecallAction(mapEntry.parsed)
+			sidebarContext = nil
+		elseif sidebarContext.action == "purge" then
+			local chunks = sidebarContext.chunks
+			table.remove(chunks, mapEntry.index)
+
+			local meta = sidebarContext.meta
+			app.clearSelection()
+			app.addToSelection({ meta.imgRef })
+			app.activateAction("delete")
+
+			local combinedText = ""
+			for _, chunk in ipairs(chunks) do
+				combinedText = combinedText .. chunk .. DELIMITER
+			end
+
+			if combinedText ~= "" then
+				app.addImages({
+					images = {
+						{
+							data = generateSidebarSvg(meta.currentCount, combinedText, #chunks),
+							x = meta.imgX,
+							y = meta.imgY,
+							maxWidth = ICON_SIZE,
+							maxHeight = ICON_SIZE,
+							aspectRatio = true,
+						},
+					},
+					allowUndoRedoAction = "none",
+				})
+				app.clearSelection()
+			end
+
+			app.refreshPage()
+			showNote("✂️ Item deleted.")
+			sidebarContext = nil
+		end
+	end
 end
 
 function initUi()
