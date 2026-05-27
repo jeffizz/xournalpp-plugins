@@ -46,6 +46,7 @@ local function utf8sub(str, numChars)
 		if not byte then
 			break
 		end
+
 		local bytes = 1
 		if byte >= 192 and byte <= 223 then
 			bytes = 2
@@ -54,6 +55,11 @@ local function utf8sub(str, numChars)
 		elseif byte >= 240 and byte <= 247 then
 			bytes = 4
 		end
+
+		if startIndex + bytes - 1 > #str then
+			break
+		end
+
 		startIndex = startIndex + bytes
 		numChars = numChars - 1
 	end
@@ -167,7 +173,9 @@ local function getStoredItems()
 	end
 
 	table.sort(items, function(a, b)
-		return a.filename < b.filename
+		local timeA = a.filename:match("^%d%d%-(%d+)") or "0"
+		local timeB = b.filename:match("^%d%d%-(%d+)") or "0"
+		return timeA < timeB
 	end)
 
 	return items
@@ -555,8 +563,8 @@ local function showPaginatedDialog(action, items, page)
 		else
 			local f = io.open(item.filepath, "r")
 			if f then
-				local content = f:read(50) or ""
-				preview = utf8sub(content:gsub("[\r\n\t]+", " "), 25) .. "..."
+				local content = f:read(100) or ""
+				preview = utf8sub(content:gsub("[\r\n\t]+", " "), 38) .. "..."
 				f:close()
 			else
 				preview = "📄 [Text] (Unreadable)"
@@ -565,7 +573,7 @@ local function showPaginatedDialog(action, items, page)
 
 		local optionLabel = (action == "recall" and "📋 Item " or "🗑️ Delete ") .. i
 		table.insert(dialogOptions, optionLabel)
-		msg = msg .. string.format("[%d] %s\n", i, preview)
+		msg = msg .. string.format("[%d](r%d)\t%s\n", i, item.recall_count, preview)
 		sidebarContext.dialogMap[#dialogOptions] = { type = "item", index = i, itemInfo = item }
 	end
 
