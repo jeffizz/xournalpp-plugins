@@ -109,6 +109,12 @@ local function getStorageDir()
 		return baseDir .. "/Untitled/1"
 	end
 
+	local pageNo = doc.pages[doc.currentPage].pdfBackgroundPageNo
+	if pageNo <= 0 then
+		showNote("⚠️ Only supports saving to pages with a PDF background.")
+		return nil
+	end
+
 	local filename = doc.xoppFilename
 	if not filename or filename == "" then
 		filename = doc.pdfBackgroundFilename
@@ -120,7 +126,6 @@ local function getStorageDir()
 	local baseName = filename:match("([^/]+)$") or filename
 	baseName = baseName:gsub("%.xopp$", ""):gsub("%.pdf$", "")
 
-	local pageNo = tostring(doc.currentPage or 1)
 	return baseDir .. "/" .. baseName .. "/" .. pageNo
 end
 
