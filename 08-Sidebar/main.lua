@@ -5,7 +5,7 @@ local metadata = require("metadata")
 local cachedStoragePath = nil
 
 local MARKER_COLOR = 0xEF514E
-local MARKER_BASE_PRESSURE = 1.7700
+local MARKER_BASE_PRESSURE = 1.7777
 local DEFAULT_MARKER_SCALE = 0.5
 
 local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
@@ -153,11 +153,13 @@ local function getStoredItems()
 	local f = io.popen(cmd, "r")
 	if f then
 		for filename in f:lines() do
-			if filename:match("%.png$") or filename:match("%.md$") then
+			local rc_str = filename:match("^(%d%d)%-")
+			if rc_str and (filename:match("%.png$") or filename:match("%.md$")) then
 				table.insert(items, {
 					filename = filename,
 					filepath = dir .. "/" .. filename,
 					type = filename:match("%.png$") and "image" or "text",
+					recall_count = tonumber(rc_str) or 0,
 				})
 			end
 		end
@@ -171,7 +173,24 @@ local function getStoredItems()
 	return items
 end
 
-local function updateSidebarMarker(inc_recall)
+local function incrementRecallCountAndRename(item)
+	local dir = getStorageDir()
+	local rc_str, rest = item.filename:match("^(%d%d)%-(.*)$")
+	if rc_str and rest then
+		local rc = tonumber(rc_str)
+		if rc < 99 then
+			rc = rc + 1
+		end
+		local newRcStr = string.format("%02d", rc)
+		local newFilename = newRcStr .. "-" .. rest
+		local newFilepath = dir .. "/" .. newFilename
+		os.rename(item.filepath, newFilepath)
+		return newFilepath
+	end
+	return item.filepath
+end
+
+local function updateSidebarMarker()
 	local items = getStoredItems() or {}
 	local stash_count = #items
 
@@ -179,6 +198,13 @@ local function updateSidebarMarker(inc_recall)
 	local center_x, center_y = nil, nil
 	local current_marker_scale = DEFAULT_MARKER_SCALE
 	local recall_count = 0
+
+	for _, item in ipairs(items) do
+		recall_count = recall_count + (item.recall_count or 0)
+	end
+	if recall_count > 99 then
+		recall_count = 99
+	end
 
 	local strokes = app.getStrokes("page") or {}
 	for _, s in ipairs(strokes) do
@@ -215,8 +241,6 @@ local function updateSidebarMarker(inc_recall)
 
 		if max_bb > 10 and #s.x > 50 then
 			local user_scale = max_bb / 84
-			local decoded_p = p_val
-
 			if p_val >= (MARKER_BASE_PRESSURE - 0.002) and p_val <= (MARKER_BASE_PRESSURE + 0.010) then
 				is_marker = true
 			elseif
@@ -234,17 +258,6 @@ local function updateSidebarMarker(inc_recall)
 				center_y = (miny + maxy) / 2
 
 				current_marker_scale = user_scale
-
-				if p_val >= (MARKER_BASE_PRESSURE - 0.005) and p_val <= (MARKER_BASE_PRESSURE + 0.020) then
-					decoded_p = p_val
-				else
-					decoded_p = p_val / user_scale
-				end
-
-				local decoded_rc = math.floor((decoded_p - MARKER_BASE_PRESSURE) * 10000 + 0.5)
-				if decoded_rc > recall_count and decoded_rc <= 99 then
-					recall_count = decoded_rc
-				end
 			end
 		end
 	end
@@ -260,15 +273,7 @@ local function updateSidebarMarker(inc_recall)
 		return
 	end
 
-	if inc_recall then
-		recall_count = recall_count + 1
-	end
-	if recall_count > 99 then
-		recall_count = 99
-	end
-
-	local base_p = MARKER_BASE_PRESSURE + (recall_count / 10000)
-	local target_pressure = base_p * current_marker_scale
+	local target_pressure = MARKER_BASE_PRESSURE * current_marker_scale
 
 	local cx, cy = center_x, center_y
 	if not cx or not cy then
@@ -617,8 +622,8 @@ function handlePaginatedCallback(selectedIndex)
 				local fullData = f:read("*a")
 				f:close()
 				triggerRecallAction({ type = itemInfo.type, data = fullData })
-
-				updateSidebarMarker(true)
+				incrementRecallCountAndRename(itemInfo)
+				updateSidebarMarker()
 			else
 				showNote("❌ Could not read file data.")
 			end
@@ -626,8 +631,7 @@ function handlePaginatedCallback(selectedIndex)
 		elseif sidebarContext.action == "purge" then
 			os.remove(itemInfo.filepath)
 			showNote("✂️ Item deleted.")
-
-			updateSidebarMarker(false)
+			updateSidebarMarker()
 			sidebarContext = nil
 		end
 	end
@@ -649,10 +653,10 @@ function stashSidebar()
 	local hash = simpleHash(clipObj.data)
 	local ext = clipObj.type == "image" and ".png" or ".md"
 	local timeStr = os.date("%Y%m%d%H%M%S")
-	local newFilename = timeStr .. "-" .. hash .. ext
+	local newFilename = "00-" .. timeStr .. "-" .. hash .. ext
 	local newFilepath = dir .. "/" .. newFilename
 
-	local checkCmd = string.format('ls "%s"/*-%s.* 2>/dev/null', dir, hash)
+	local checkCmd = string.format('ls "%s"/[0-9][0-9]-*-%s.* 2>/dev/null', dir, hash)
 	local checkF = io.popen(checkCmd, "r")
 	if checkF then
 		local res = checkF:read("*a")
@@ -672,7 +676,7 @@ function stashSidebar()
 		fOut:write(clipObj.data)
 		fOut:close()
 
-		updateSidebarMarker(false)
+		updateSidebarMarker()
 		showNote(clipObj.type == "image" and "✅ Image stored locally!" or "✅ Text stored locally!")
 	else
 		showNote("❌ Failed to write file to Obsidian folder.")
@@ -690,7 +694,7 @@ function recallSidebar()
 	end
 
 	if #items > 0 then
-		updateSidebarMarker(false)
+		updateSidebarMarker()
 	end
 
 	if #items == 1 then
@@ -699,7 +703,8 @@ function recallSidebar()
 			local fullData = f:read("*a")
 			f:close()
 			triggerRecallAction({ type = items[1].type, data = fullData })
-			updateSidebarMarker(true)
+			incrementRecallCountAndRename(items[1])
+			updateSidebarMarker()
 			return
 		end
 	end
