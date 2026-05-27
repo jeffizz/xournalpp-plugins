@@ -5,8 +5,8 @@ local metadata = require("metadata")
 local cachedStoragePath = nil
 
 local MARKER_COLOR = 0xEF514E
-local MARKER_BASE_PRESSURE = 1.2600
-local DEFAULT_MARKER_SCALE = 0.8
+local MARKER_BASE_PRESSURE = 1.7700
+local DEFAULT_MARKER_SCALE = 0.5
 
 local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
 local is_mac = false
@@ -644,10 +644,10 @@ function stashSidebar()
 	local hash = simpleHash(clipObj.data)
 	local ext = clipObj.type == "image" and ".png" or ".md"
 	local timeStr = os.date("%Y%m%d%H%M%S")
-	local newFilename = timeStr .. "_" .. hash .. ext
+	local newFilename = timeStr .. "-" .. hash .. ext
 	local newFilepath = dir .. "/" .. newFilename
 
-	local checkCmd = string.format('ls "%s"/*+%s.* 2>/dev/null', dir, hash)
+	local checkCmd = string.format('ls "%s"/*-%s.* 2>/dev/null', dir, hash)
 	local checkF = io.popen(checkCmd, "r")
 	if checkF then
 		local res = checkF:read("*a")
@@ -757,12 +757,12 @@ function setStoragePath()
 end
 
 function initUi()
-	app.registerUi({ ["menu"] = "Sidebar: Stash Clipboard", ["callback"] = "stashSidebar", ["accelerator"] = "<Alt>1" })
-	app.registerUi({ ["menu"] = "Sidebar: Recall & Read", ["callback"] = "recallSidebar", ["accelerator"] = "<Alt>2" })
-	app.registerUi({ ["menu"] = "Sidebar: Purge Assets", ["callback"] = "purgeSidebar", ["accelerator"] = "<Alt>3" })
 	app.registerUi({
-		["menu"] = "Sidebar: Set Storage Path",
-		["callback"] = "setStoragePath",
-		["accelerator"] = "<Alt>4",
+		["menu"] = "Sidebar: Stash Clipboard",
+		["callback"] = "stashSidebar",
+		["accelerator"] = "<Shift>w",
 	})
+	app.registerUi({ ["menu"] = "Sidebar: Recall & Read", ["callback"] = "recallSidebar", ["accelerator"] = "<Shift>r" })
+	app.registerUi({ ["menu"] = "Sidebar: Purge Assets", ["callback"] = "purgeSidebar", ["accelerator"] = "<Shift>d" })
+	app.registerUi({ ["menu"] = "Sidebar: Set Storage Path", ["callback"] = "setStoragePath" })
 end
