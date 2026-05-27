@@ -1,157 +1,12 @@
 sidebarContext = nil
 
-local ICON_SIZE = 45
-local FOOTER_MARKER = ":::#SIDEBAR#:::"
-local DELIMITER = "\n\n🚀========== SIDEBAR ENTRY ==========\n\n"
+local metadata = require("metadata")
 
-local function getCenter()
-	local doc = app.getDocumentStructure()
-	if not doc or not doc.pages then
-		return 297, 421
-	end
-	local pageNo = doc.currentPage
-	local page = doc.pages[pageNo]
-	local w = page.pageWidth or 595
-	local h = page.pageHeight or 842
-	return w / 2, h / 2
-end
+local cachedStoragePath = nil
 
-local function generateSidebarSvg(readCount, payload, stashCount)
-	local readCountStr = readCount > 0 and tostring(readCount) or "0"
-	local stashCountStr = stashCount > 0 and tostring(stashCount) or "0"
-
-	return [[<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect x="2" y="2" width="96" height="96" rx="13" fill="white" stroke="#000000" stroke-width="4"/>
-
-  <path d="M 15 4 H 85 A 11 11 0 0 1 96 15 V 34 H 4 V 15 A 11 11 0 0 1 15 4 Z" fill="#4ade80" />
-
-  <line x1="4" y1="34" x2="96" y2="34" stroke="#000000" stroke-width="4"/>
-  <line x1="35" y1="34" x2="35" y2="98" stroke="#000000" stroke-width="4"/>
-
-  <line x1="35" y1="66" x2="96" y2="66" stroke="#000000" stroke-width="4"/>
-
-  <text x="50" y="26" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="black" text-anchor="middle">sidebar</text>
-
-  <line x1="4" y1="55" x2="25" y2="55" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
-  <line x1="10" y1="75" x2="25" y2="75" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
-
-  <text x="65" y="57" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FF5555" text-anchor="middle">]] .. stashCountStr .. [[</text>
-
-  <text x="65" y="89" font-family="sans-serif" font-size="22" font-weight="bold" fill="#FF5555" text-anchor="middle">]] .. readCountStr .. [[</text>
-
-  <desc id="sidebar-meta">:::COUNT:::]] .. tostring(readCount) .. [[:::ENDCOUNT::::::S1D3B4R:::]] .. payload .. [[:::END:::]] .. FOOTER_MARKER .. [[</desc>
-</svg>]]
-end
-
-local function extractSidebarMeta(imgData)
-	if type(imgData) ~= "string" then
-		return nil, 0
-	end
-
-	if not string.find(imgData, FOOTER_MARKER, -100, true) then
-		return nil, 0
-	end
-
-	local payload = nil
-	local count = 0
-
-	local ps, pe = string.find(imgData, ":::S1D3B4R:::", 1, true)
-	if ps then
-		local pend = string.find(imgData, ":::END:::", pe + 1, true)
-		if pend then
-			payload = string.sub(imgData, pe + 1, pend - 1)
-		end
-	end
-
-	local cs, ce = string.find(imgData, ":::COUNT:::", 1, true)
-	if cs then
-		local cend = string.find(imgData, ":::ENDCOUNT:::", ce + 1, true)
-		if cend then
-			count = tonumber(string.sub(imgData, ce + 1, cend - 1)) or 0
-		end
-	end
-
-	return payload, count
-end
-
-local function findSidebarSVG()
-	local allImages = app.getImages("layer") or {}
-	local targetImgRef, targetImgX, targetImgY = nil, nil, nil
-	local rawText, currentCount = "", 0
-
-	for _, img in ipairs(allImages) do
-		local payload, count = extractSidebarMeta(img.data)
-		if payload then
-			rawText = rawText .. payload
-			targetImgRef = img.ref
-			targetImgX = img.x
-			targetImgY = img.y
-			currentCount = count
-			break
-		end
-	end
-	return targetImgRef, targetImgX, targetImgY, rawText, currentCount
-end
-
-local function getChunks(rawText)
-	local chunks = {}
-	if not rawText or rawText == "" then
-		return chunks
-	end
-	local escapedDelimiter = string.gsub(DELIMITER, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-	for chunk in string.gmatch(rawText, "(.-)" .. escapedDelimiter) do
-		local clean = chunk:match("^%s*(.-)%s*$")
-		if clean and clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
-	if #chunks == 0 then
-		local clean = rawText:match("^%s*(.-)%s*$")
-		if clean and clean ~= "" then
-			table.insert(chunks, clean)
-		end
-	end
-	return chunks
-end
-
-local function getByteCount(byte)
-	if not byte then
-		return 1
-	end
-	if byte >= 0 and byte <= 127 then
-		return 1
-	elseif byte >= 192 and byte <= 223 then
-		return 2
-	elseif byte >= 224 and byte <= 239 then
-		return 3
-	elseif byte >= 240 and byte <= 247 then
-		return 4
-	end
-	return 1
-end
-
-local function utf8sub(str, startChar, numChars)
-	local startIndex = 1
-	while startChar > 1 do
-		local byte = string.byte(str, startIndex)
-		if not byte then
-			break
-		end
-		startIndex = startIndex + getByteCount(byte)
-		startChar = startChar - 1
-	end
-	local currentIndex = startIndex
-	while numChars > 0 and currentIndex <= #str do
-		local byte = string.byte(str, currentIndex)
-		if not byte then
-			break
-		end
-		currentIndex = currentIndex + getByteCount(byte)
-		numChars = numChars - 1
-	end
-	return str:sub(startIndex, currentIndex - 1)
-end
+local MARKER_COLOR = 0xEF514E
+local MARKER_BASE_PRESSURE = 1.2600
+local DEFAULT_MARKER_SCALE = 0.8
 
 local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
 local is_mac = false
@@ -167,99 +22,395 @@ if os_name == "unix" then
 	end
 end
 
-local function getUniqueTmpFile(ext)
-	local base = os.tmpname()
-	if os_name == "win" and not base:match("^[A-Za-z]:") then
-		local tempDir = os.getenv("TEMP") or os.getenv("TMP") or "C:\\Temp"
-		base = tempDir .. "\\" .. base:match("([^\\/]+)$")
-	end
-	return base .. "_" .. tostring(math.floor(os.clock() * 10000)) .. ext
-end
-
 local function showNote(msg)
 	app.openDialog(msg, { "OK" }, "", false)
 end
 
-local b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-local b64dec = {}
-for i = 1, 64 do
-	b64dec[b64chars:sub(i, i)] = i - 1
+local function getUniqueTmpFile(ext)
+	local base = os.tmpname()
+	return base .. "_" .. tostring(math.floor(os.clock() * 10000)) .. ext
 end
 
-local function fastB64Encode(data)
-	local out = {}
-	local len = #data
-	for i = 1, len, 3 do
-		local a, b, c = string.byte(data, i, i + 2)
-		a = a or 0
-		b = b or 0
-		c = c or 0
-		local v = a * 65536 + b * 256 + c
-		local d1 = math.floor(v / 262144) % 64
-		local d2 = math.floor(v / 4096) % 64
-		local d3 = math.floor(v / 64) % 64
-		local d4 = v % 64
-		table.insert(out, b64chars:sub(d1 + 1, d1 + 1))
-		table.insert(out, b64chars:sub(d2 + 1, d2 + 1))
-		table.insert(out, i + 1 <= len and b64chars:sub(d3 + 1, d3 + 1) or "=")
-		table.insert(out, i + 2 <= len and b64chars:sub(d4 + 1, d4 + 1) or "=")
+local function simpleHash(str)
+	local h = 5381
+	for i = 1, #str do
+		h = (h * 33 + str:byte(i)) % 4294967296
 	end
-	return table.concat(out)
+	return string.format("%08x", h)
 end
 
-local function fastB64Decode(data)
-	data = string.gsub(data, "[^" .. b64chars .. "=]", "")
-	local out = {}
-	local len = #data
-	for i = 1, len, 4 do
-		local chars = { string.sub(data, i, i + 3):byte(1, 4) }
-		local a = b64dec[string.char(chars[1] or 0)] or 0
-		local b = b64dec[string.char(chars[2] or 0)] or 0
-		local c = b64dec[string.char(chars[3] or 0)] or 0
-		local d = b64dec[string.char(chars[4] or 0)] or 0
-		local v = a * 262144 + b * 4096 + c * 64 + d
-		table.insert(out, string.char(math.floor(v / 65536) % 256))
-		if chars[3] ~= 61 then
-			table.insert(out, string.char(math.floor(v / 256) % 256))
-		end
-		if chars[4] ~= 61 then
-			table.insert(out, string.char(v % 256))
-		end
-	end
-	return table.concat(out)
-end
-
-local function extractPngIdat(data)
-	if data:sub(1, 8) ~= "\137\080\078\071\013\010\026\010" then
-		return data
-	end
-	local idat, pos, len = {}, 9, #data
-	while pos <= len - 8 do
-		local l1, l2, l3, l4 = string.byte(data, pos, pos + 3)
-		if not l1 then
+local function utf8sub(str, numChars)
+	local startIndex = 1
+	while numChars > 0 and startIndex <= #str do
+		local byte = string.byte(str, startIndex)
+		if not byte then
 			break
 		end
-		local chunkLen = l1 * 16777216 + l2 * 65536 + l3 * 256 + l4
-		local chunkType = string.sub(data, pos + 4, pos + 7)
-		if chunkType == "IDAT" then
-			table.insert(idat, string.sub(data, pos + 8, pos + 7 + chunkLen))
-		elseif chunkType == "IEND" then
-			break
+		local bytes = 1
+		if byte >= 192 and byte <= 223 then
+			bytes = 2
+		elseif byte >= 224 and byte <= 239 then
+			bytes = 3
+		elseif byte >= 240 and byte <= 247 then
+			bytes = 4
 		end
-		pos = pos + 12 + chunkLen
+		startIndex = startIndex + bytes
+		numChars = numChars - 1
 	end
-	return table.concat(idat)
+	return str:sub(1, startIndex - 1)
+end
+
+local function getCenter()
+	local doc = app.getDocumentStructure()
+	if not doc or not doc.pages then
+		return 297, 421
+	end
+	local pageNo = doc.currentPage
+	local page = doc.pages[pageNo]
+	local w = page.pageWidth or 595
+	local h = page.pageHeight or 842
+	return w / 2, h / 2
+end
+
+local function getBaseStorageDir()
+	if cachedStoragePath then
+		return cachedStoragePath
+	end
+
+	local text = metadata.getMetadataText()
+	if text and text ~= "" then
+		local db = metadata.parseINI(text)
+		if db and db["Sidebar"] and db["Sidebar"]["StoragePath"] then
+			local path = db["Sidebar"]["StoragePath"]
+			if path ~= "" then
+				cachedStoragePath = path
+				return cachedStoragePath
+			end
+		end
+	end
+	return nil
+end
+
+local function getStorageDir()
+	local baseDir = getBaseStorageDir()
+
+	if not baseDir then
+		app.openDialog(
+			"⚠️ Storage path not configured!\n\nPlease copy your target folder path and click [Sidebar: Set Storage Path] in the menu.",
+			{ "OK" },
+			"",
+			true
+		)
+		return nil
+	end
+
+	local doc = app.getDocumentStructure()
+	if not doc then
+		return baseDir .. "/Untitled/1"
+	end
+
+	local filename = doc.xoppFilename
+	if not filename or filename == "" then
+		filename = doc.pdfBackgroundFilename
+	end
+	if not filename or filename == "" then
+		filename = "Untitled"
+	end
+
+	local baseName = filename:match("([^/]+)$") or filename
+	baseName = baseName:gsub("%.xopp$", ""):gsub("%.pdf$", "")
+
+	local pageNo = tostring(doc.currentPage or 1)
+	return baseDir .. "/" .. baseName .. "/" .. pageNo
+end
+
+local digitPaths = {
+	["0"] = { { 0, 1 }, { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } },
+	["1"] = { { 0, 1 }, { 0.5, 1 }, { 0.5, 0 } },
+	["2"] = { { 0, 1 }, { 1, 1 }, { 0, 1 }, { 0, 0.5 }, { 1, 0.5 }, { 1, 0 }, { 0, 0 } },
+	["3"] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 }, { 1, 0 }, { 1, 0.5 }, { 0.2, 0.5 } },
+	["4"] = { { 0, 1 }, { 0.8, 1 }, { 0.8, 0 }, { 0.8, 0.5 }, { 0, 0.5 }, { 0, 0 } },
+	["5"] = { { 0, 1 }, { 1, 1 }, { 1, 0.5 }, { 0, 0.5 }, { 0, 0 }, { 1, 0 } },
+	["6"] = { { 0, 1 }, { 1, 1 }, { 1, 0.5 }, { 0, 0.5 }, { 0, 1 }, { 0, 0 }, { 1, 0 } },
+	["7"] = { { 0, 1 }, { 1, 0 }, { 0, 0 } },
+	["8"] = { { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 }, { 0, 1 }, { 0, 0.5 }, { 1, 0.5 } },
+	["9"] = { { 0, 1 }, { 0.8, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 }, { 0, 0.5 }, { 1, 0.5 } },
+}
+
+local function getStoredItems()
+	local dir = getStorageDir()
+	if not dir then
+		return nil
+	end
+
+	local items = {}
+	local cmd = string.format('ls -1 "%s" 2>/dev/null', dir)
+	local f = io.popen(cmd, "r")
+	if f then
+		for filename in f:lines() do
+			if filename:match("%.png$") or filename:match("%.md$") then
+				table.insert(items, {
+					filename = filename,
+					filepath = dir .. "/" .. filename,
+					type = filename:match("%.png$") and "image" or "text",
+				})
+			end
+		end
+		f:close()
+	end
+
+	table.sort(items, function(a, b)
+		return a.filename < b.filename
+	end)
+
+	return items
+end
+
+local function updateSidebarMarker(inc_recall)
+	local items = getStoredItems() or {}
+	local stash_count = #items
+
+	local refsToDelete = {}
+	local center_x, center_y = nil, nil
+	local current_marker_scale = DEFAULT_MARKER_SCALE
+	local recall_count = 0
+
+	local strokes = app.getStrokes("page") or {}
+	for _, s in ipairs(strokes) do
+		local is_marker = false
+		local p_val = 0
+
+		if s.pressure and #s.pressure > 0 then
+			local sum = 0
+			for i = 1, #s.pressure do
+				sum = sum + s.pressure[i]
+			end
+			p_val = sum / #s.pressure
+		end
+
+		local minx, maxx, miny, maxy = s.x[1], s.x[1], s.y[1], s.y[1]
+		for i = 2, #s.x do
+			if s.x[i] < minx then
+				minx = s.x[i]
+			end
+			if s.x[i] > maxx then
+				maxx = s.x[i]
+			end
+			if s.y[i] < miny then
+				miny = s.y[i]
+			end
+			if s.y[i] > maxy then
+				maxy = s.y[i]
+			end
+		end
+
+		local bb_width = maxx - minx
+		local bb_height = maxy - miny
+		local max_bb = math.max(bb_width, bb_height)
+
+		if max_bb > 10 and #s.x > 50 then
+			local user_scale = max_bb / 84
+			local decoded_p = p_val
+
+			if p_val >= (MARKER_BASE_PRESSURE - 0.002) and p_val <= (MARKER_BASE_PRESSURE + 0.010) then
+				is_marker = true
+			elseif
+				(p_val / user_scale) >= (MARKER_BASE_PRESSURE - 0.002)
+				and (p_val / user_scale) <= (MARKER_BASE_PRESSURE + 0.010)
+			then
+				is_marker = true
+			elseif s.color == MARKER_COLOR then
+				is_marker = true
+			end
+
+			if is_marker then
+				table.insert(refsToDelete, s.ref)
+				center_x = (minx + maxx) / 2
+				center_y = (miny + maxy) / 2
+
+				current_marker_scale = user_scale
+
+				if p_val >= (MARKER_BASE_PRESSURE - 0.005) and p_val <= (MARKER_BASE_PRESSURE + 0.020) then
+					decoded_p = p_val
+				else
+					decoded_p = p_val / user_scale
+				end
+
+				local decoded_rc = math.floor((decoded_p - MARKER_BASE_PRESSURE) * 10000 + 0.5)
+				if decoded_rc > recall_count and decoded_rc <= 99 then
+					recall_count = decoded_rc
+				end
+			end
+		end
+	end
+
+	if #refsToDelete > 0 then
+		app.clearSelection()
+		app.addToSelection(refsToDelete)
+		app.activateAction("delete")
+	end
+
+	if stash_count == 0 then
+		app.refreshPage()
+		return
+	end
+
+	if inc_recall then
+		recall_count = recall_count + 1
+	end
+	if recall_count > 99 then
+		recall_count = 99
+	end
+
+	local base_p = MARKER_BASE_PRESSURE + (recall_count / 10000)
+	local target_pressure = base_p * current_marker_scale
+
+	local cx, cy = center_x, center_y
+	if not cx or not cy then
+		cx, cy = getCenter()
+	end
+
+	local X, Y, P = {}, {}, {}
+
+	local function p(x, y)
+		table.insert(X, x)
+		table.insert(Y, y)
+		table.insert(P, target_pressure)
+	end
+
+	local function retrace(from_idx)
+		for i = #X - 1, from_idx, -1 do
+			p(X[i], Y[i])
+		end
+	end
+
+	local function arc(ax, ay, rad, start_angle, end_angle, steps)
+		for i = 0, steps do
+			local a = start_angle + (end_angle - start_angle) * (i / steps)
+			p(ax + rad * math.cos(math.rad(a)), ay + rad * math.sin(math.rad(a)))
+		end
+	end
+
+	local R = 28 * current_marker_scale
+	local R_OUT = 42 * current_marker_scale
+	local S = R * 0.70710678
+
+	local max_w = 34 * current_marker_scale
+	local W_BASE = 7 * current_marker_scale
+	local H_BASE = 12 * current_marker_scale
+	local SPACING_BASE = 4 * current_marker_scale
+
+	local function drawEmbeddedText(textStr, cx_offset, cy_offset, is_left)
+		local w, h, sp = W_BASE, H_BASE, SPACING_BASE
+		local total_w = #textStr * w + (#textStr - 1) * sp
+		if total_w > max_w then
+			local scale = max_w / total_w
+			w = w * scale
+			h = h * scale
+			sp = sp * scale
+			total_w = max_w
+		end
+
+		local start_x = cx + cx_offset * current_marker_scale - total_w / 2
+		local bottom_y = cy + cy_offset * current_marker_scale
+		local edge_x = is_left and (cx - S) or (cx + S)
+
+		p(edge_x, bottom_y)
+		p(start_x, bottom_y)
+
+		for i = 1, #textStr do
+			local char = textStr:sub(i, i)
+			local char_x = start_x + (i - 1) * (w + sp)
+			local mark_char = #X
+			p(char_x, bottom_y)
+			local path = digitPaths[char] or digitPaths["0"]
+			for _, pt in ipairs(path) do
+				p(char_x + pt[1] * w, bottom_y - h + pt[2] * h)
+			end
+			retrace(mark_char)
+		end
+
+		p(edge_x, bottom_y)
+	end
+
+	p(cx, cy - R)
+
+	local mark_shell = #X
+	p(cx, cy - R_OUT)
+	arc(cx, cy, R_OUT, 270, 180, 12)
+
+	local mark_L_conn = #X
+	p(cx - R, cy)
+	retrace(mark_L_conn)
+
+	arc(cx, cy, R_OUT, 180, 90, 12)
+
+	local mark_B_conn = #X
+	p(cx, cy + R)
+	retrace(mark_B_conn)
+
+	arc(cx, cy, R_OUT, 90, 0, 12)
+
+	local mark_R_conn = #X
+	p(cx + R, cy)
+	retrace(mark_R_conn)
+
+	arc(cx, cy, R_OUT, 0, -90, 12)
+
+	retrace(mark_shell)
+
+	arc(cx, cy, R, 270, 225, 8)
+
+	local mark_inner_start = #X
+
+	p(cx - S, cy - 3 * current_marker_scale)
+	drawEmbeddedText(tostring(stash_count), -9, -3, true)
+
+	p(cx - S, cy + S)
+
+	local mark_slash = #X
+	p(cx + S, cy - S)
+	retrace(mark_slash)
+
+	p(cx + S, cy + S)
+
+	p(cx + S, cy + 16 * current_marker_scale)
+	drawEmbeddedText(tostring(recall_count), 9, 16, false)
+
+	p(cx + S, cy - S)
+	p(cx - S, cy - S)
+
+	retrace(mark_inner_start)
+
+	arc(cx, cy, R, 225, 180, 8)
+	arc(cx, cy, R, 180, 90, 16)
+	arc(cx, cy, R, 90, 0, 16)
+	arc(cx, cy, R, 0, -90, 16)
+
+	local stroke_visual_thickness = 2.0 * current_marker_scale
+	local stroke_width_param = stroke_visual_thickness / target_pressure
+
+	app.addStrokes({
+		strokes = {
+			{
+				x = X,
+				y = Y,
+				pressure = P,
+				tool = "pen",
+				width = stroke_width_param,
+				color = MARKER_COLOR,
+				fill = 60,
+				lineStyle = "solid",
+			},
+		},
+		allowUndoRedoAction = "none",
+	})
+	app.refreshPage()
 end
 
 local function getClipboardText()
 	local text = ""
-	if os_name == "win" then
-		local f = io.popen("powershell -command Get-Clipboard", "r")
-		if f then
-			text = f:read("*a")
-			f:close()
-		end
-	elseif is_mac then
+	if is_mac then
 		local f = io.popen("pbpaste 2>/dev/null", "r")
 		if f then
 			text = f:read("*a")
@@ -271,25 +422,13 @@ local function getClipboardText()
 			text = f:read("*a")
 			f:close()
 		end
-		if not text or text == "" then
-			f = io.popen("wl-paste 2>/dev/null", "r")
-			if f then
-				text = f:read("*a")
-				f:close()
-			end
-		end
 	end
 	return text and text:match("^%s*(.-)%s*$") or ""
 end
 
 local function getSmartClipboardData()
 	local imgPath = getUniqueTmpFile(".png")
-	if os_name == "win" then
-		local cmd = "powershell -command \"Add-Type -AssemblyName System.Windows.Forms; if ([Windows.Forms.Clipboard]::ContainsImage()) { $img = [Windows.Forms.Clipboard]::GetImage(); $img.Save('"
-			.. imgPath
-			.. "', [System.Drawing.Imaging.ImageFormat]::Png); $img.Dispose() }\""
-		os.execute(cmd)
-	elseif is_mac then
+	if is_mac then
 		local infoF = io.popen("osascript -e 'clipboard info' 2>/dev/null", "r")
 		local info = infoF:read("*a") or ""
 		infoF:close()
@@ -308,13 +447,7 @@ local function getSmartClipboardData()
 			end
 		end
 	else
-		os.execute(
-			'xclip -selection clipboard -t image/png -o > "'
-				.. imgPath
-				.. '" 2>/dev/null || wl-paste -t image/png > "'
-				.. imgPath
-				.. '" 2>/dev/null'
-		)
+		os.execute('xclip -selection clipboard -t image/png -o > "' .. imgPath .. '" 2>/dev/null')
 	end
 
 	local f = io.open(imgPath, "rb")
@@ -342,13 +475,10 @@ local function triggerRecallAction(parsedObj)
 			f:write(parsedObj.data)
 			f:close()
 		end
-		if os_name == "win" then
-			os.execute("powershell -command \"Get-Content -Raw '" .. tmpFile .. "' | Set-Clipboard\"")
-		elseif is_mac then
+		if is_mac then
 			os.execute("cat '" .. tmpFile .. "' | pbcopy")
 		else
 			os.execute("cat '" .. tmpFile .. "' | xclip -selection clipboard -i 2>/dev/null")
-			os.execute("cat '" .. tmpFile .. "' | wl-copy 2>/dev/null")
 		end
 		os.remove(tmpFile)
 	elseif parsedObj.type == "image" then
@@ -358,12 +488,7 @@ local function triggerRecallAction(parsedObj)
 			f:write(parsedObj.data)
 			f:close()
 		end
-		if os_name == "win" then
-			local cmd = "powershell -command \"Add-Type -AssemblyName System.Windows.Forms; $img = [System.Drawing.Image]::FromFile('"
-				.. imgPath
-				.. "'); [Windows.Forms.Clipboard]::SetImage($img); $img.Dispose()\""
-			os.execute(cmd)
-		elseif is_mac then
+		if is_mac then
 			local tiffPath = getUniqueTmpFile(".tiff")
 			os.execute(string.format("sips -s format tiff '%s' --out '%s' >/dev/null 2>&1", imgPath, tiffPath))
 			os.execute(
@@ -374,242 +499,64 @@ local function triggerRecallAction(parsedObj)
 			)
 			os.remove(tiffPath)
 		else
-			os.execute(
-				'xclip -selection clipboard -t image/png -i "'
-					.. imgPath
-					.. '" 2>/dev/null || wl-copy -t image/png < "'
-					.. imgPath
-					.. '" 2>/dev/null'
-			)
+			os.execute('xclip -selection clipboard -t image/png -i "' .. imgPath .. '" 2>/dev/null')
 		end
 		os.remove(imgPath)
-	end
-
-	if incrementBadgeCount then
-		incrementBadgeCount()
 	end
 
 	if is_mac then
 		os.execute("open 'raycast://extensions/codiy/clipboard-preview/clipboard-preview'")
 	else
-		local note = parsedObj.type == "image" and "✅ Image decrypted and copied to clipboard!"
-			or "✅ Text decrypted and copied to clipboard!"
-		showNote(note)
+		showNote(parsedObj.type == "image" and "✅ Image copied to clipboard!" or "✅ Text copied to clipboard!")
 	end
 end
 
-local function compressTextToZ64(text)
-	if os_name == "win" then
-		return "B64:" .. fastB64Encode(text)
-	end
-	local tmpIn = getUniqueTmpFile(".txt")
-	local f = io.open(tmpIn, "w")
-	if not f then
-		return "B64:" .. fastB64Encode(text)
-	end
-	f:write(text)
-	f:close()
-	local tmpGz = tmpIn .. ".gz"
-	os.execute(string.format("gzip -c '%s' > '%s'", tmpIn, tmpGz))
-	local fGz = io.open(tmpGz, "rb")
-	local gzData = ""
-	if fGz then
-		gzData = fGz:read("*a")
-		fGz:close()
-	end
-	os.remove(tmpIn)
-	os.remove(tmpGz)
-	if gzData == "" then
-		return "B64:" .. fastB64Encode(text)
-	end
-	return "Z64:" .. fastB64Encode(gzData)
-end
-
-local function decodeZ64ToText(z64text)
-	if os_name == "win" then
-		return "[System Info: This record is in Z64 compressed format and requires macOS to decompress]"
-	end
-	local gzData = fastB64Decode(z64text)
-	local tmpGz = getUniqueTmpFile(".gz")
-	local f = io.open(tmpGz, "wb")
-	if not f then
-		return ""
-	end
-	f:write(gzData)
-	f:close()
-	local handle = io.popen(string.format("gzip -dc '%s'", tmpGz), "r")
-	local result = ""
-	if handle then
-		result = handle:read("*a")
-		handle:close()
-	end
-	os.remove(tmpGz)
-	return result
-end
-
-local function parseChunk(chunkText)
-	if chunkText:sub(1, 8) == "IMG:B64:" then
-		return { type = "image", data = fastB64Decode(chunkText:sub(9)) }
-	elseif chunkText:sub(1, 4) == "Z64:" then
-		return { type = "text", data = decodeZ64ToText(chunkText:sub(5)) }
-	elseif chunkText:sub(1, 4) == "B64:" then
-		return { type = "text", data = fastB64Decode(chunkText:sub(5)) }
-	end
-	return { type = "text", data = chunkText }
-end
-
-incrementBadgeCount = function()
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
-	if not targetImgRef then
-		return
-	end
-
-	local chunks = getChunks(rawText)
-
-	app.clearSelection()
-	app.addToSelection({ targetImgRef })
-	app.activateAction("delete")
-
-	app.addImages({
-		images = {
-			{
-				data = generateSidebarSvg(currentCount + 1, rawText, #chunks),
-				x = targetImgX,
-				y = targetImgY,
-				maxWidth = ICON_SIZE,
-				maxHeight = ICON_SIZE,
-				aspectRatio = true,
-			},
-		},
-		allowUndoRedoAction = "none",
-	})
-
-	app.clearSelection()
-	app.refreshPage()
-end
-
-function stashSidebar()
-	local clipObj = getSmartClipboardData()
-	if not clipObj then
-		return showNote("❌ Clipboard is empty. Please copy some text or image first.")
-	end
-
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
-	local chunks = getChunks(rawText)
-	local totalImageSize = 0
-
-	for _, chunk in ipairs(chunks) do
-		local parsed = parseChunk(chunk)
-		if parsed.type == "image" then
-			totalImageSize = totalImageSize + #parsed.data
-		end
-
-		if parsed.type == clipObj.type then
-			if parsed.type == "image" then
-				if extractPngIdat(parsed.data) == extractPngIdat(clipObj.data) then
-					return showNote("⚠️ This image is already stored. Duplicate rejected.")
-				end
-			else
-				if parsed.data == clipObj.data then
-					return showNote("⚠️ This text is already stored. Duplicate rejected.")
-				end
-			end
-		end
-	end
-
-	if clipObj.type == "image" then
-		if #clipObj.data > 1 * 1024 * 1024 then
-			return showNote("⚠️ Single image limit exceeded: Image cannot be larger than 1MB.")
-		end
-		totalImageSize = totalImageSize + #clipObj.data
-	end
-
-	if totalImageSize > 3 * 1024 * 1024 then
-		return showNote("⚠️ Storage limit exceeded: Total image size cannot exceed 5MB.")
-	end
-
-	if #chunks >= 20 then
-		return showNote("⚠️ Sidebar is full (maximum 20 items). Please delete some items first.")
-	end
-
-	local textToStash = ""
-	if clipObj.type == "image" then
-		textToStash = "IMG:B64:" .. fastB64Encode(clipObj.data)
-	else
-		textToStash = compressTextToZ64(clipObj.data)
-	end
-
-	if targetImgRef then
-		app.clearSelection()
-		app.addToSelection({ targetImgRef })
-		app.activateAction("delete")
-	end
-
-	local finalX = targetImgX
-	local finalY = targetImgY
-
-	if not finalX or not finalY then
-		local cx, cy = getCenter()
-		finalX = cx - (ICON_SIZE / 2)
-		finalY = cy - (ICON_SIZE / 2)
-	end
-
-	app.addImages({
-		images = {
-			{
-				data = generateSidebarSvg(currentCount, rawText .. textToStash .. DELIMITER, #chunks + 1),
-				x = finalX,
-				y = finalY,
-				maxWidth = ICON_SIZE,
-				maxHeight = ICON_SIZE,
-				aspectRatio = true,
-			},
-		},
-		allowUndoRedoAction = "none",
-	})
-
-	if #chunks > 0 then
-		app.clearSelection()
-	end
-
-	app.refreshPage()
-	showNote(clipObj.type == "image" and "✅ Image stored in Sidebar!" or "✅ Text stored in Sidebar!")
-end
-
-local function showPaginatedDialog(action, chunks, page, meta)
+local function showPaginatedDialog(action, items, page)
 	local ITEMS_PER_PAGE = 7
 	local startIdx = (page - 1) * ITEMS_PER_PAGE + 1
-	local endIdx = math.min(startIdx + ITEMS_PER_PAGE - 1, #chunks)
+	local endIdx = math.min(startIdx + ITEMS_PER_PAGE - 1, #items)
 
-	local msg = ""
-	if action == "recall" then
-		msg = string.format("📚 Sidebar contains the following items (Page %d):\n\n", page)
-	else
-		msg = string.format("🗑️ Select an item to delete (Page %d):\n\n", page)
-	end
+	local msg = string.format(
+		action == "recall" and "📚 Stashed items (Page %d):\n\n" or "🗑️ Select an item to delete (Page %d):\n\n",
+		page
+	)
 
 	local dialogOptions = {}
 	sidebarContext = {
 		action = action,
-		chunks = chunks,
+		items = items,
 		page = page,
-		meta = meta,
 		dialogMap = {},
 	}
 
 	for i = startIdx, endIdx do
-		local parsed = parseChunk(chunks[i])
-		local preview = parsed.type == "image"
-				and string.format("🖼️ [Image] - %d KB", math.floor(#parsed.data / 1024))
-			or (utf8sub(parsed.data:gsub("[\r\n\t]+", " "), 1, 25) .. "...")
+		local item = items[i]
+		local preview = ""
 
-		if action == "recall" then
-			table.insert(dialogOptions, "📋 Item " .. i)
+		if item.type == "image" then
+			local f = io.open(item.filepath, "rb")
+			local sizeKB = 0
+			if f then
+				local size = f:seek("end")
+				sizeKB = math.floor((size or 0) / 1024)
+				f:close()
+			end
+			preview = string.format("🖼️ [Image] - %d KB", sizeKB)
 		else
-			table.insert(dialogOptions, "🗑️ Delete " .. i)
+			local f = io.open(item.filepath, "r")
+			if f then
+				local content = f:read(50) or ""
+				preview = utf8sub(content:gsub("[\r\n\t]+", " "), 25) .. "..."
+				f:close()
+			else
+				preview = "📄 [Text] (Unreadable)"
+			end
 		end
+
+		local optionLabel = (action == "recall" and "📋 Item " or "🗑️ Delete ") .. i
+		table.insert(dialogOptions, optionLabel)
 		msg = msg .. string.format("[%d] %s\n", i, preview)
-		sidebarContext.dialogMap[#dialogOptions] = { type = "item", index = i, parsed = parsed }
+		sidebarContext.dialogMap[#dialogOptions] = { type = "item", index = i, itemInfo = item }
 	end
 
 	if page > 1 then
@@ -617,7 +564,7 @@ local function showPaginatedDialog(action, chunks, page, meta)
 		sidebarContext.dialogMap[#dialogOptions] = { type = "prev" }
 	end
 
-	if endIdx < #chunks then
+	if endIdx < #items then
 		table.insert(dialogOptions, "➡️ Next Page")
 		sidebarContext.dialogMap[#dialogOptions] = { type = "next" }
 	end
@@ -626,46 +573,6 @@ local function showPaginatedDialog(action, chunks, page, meta)
 	sidebarContext.dialogMap[#dialogOptions] = { type = "cancel" }
 
 	app.openDialog(msg, dialogOptions, "handlePaginatedCallback", false)
-end
-
-function recallSidebar()
-	local _, _, _, rawText, _ = findSidebarSVG()
-	local chunks = getChunks(rawText)
-
-	if #chunks == 0 then
-		return showNote("📭 Sidebar is empty.")
-	end
-
-	if #chunks == 1 then
-		return triggerRecallAction(parseChunk(chunks[1]))
-	end
-
-	showPaginatedDialog("recall", chunks, 1, nil)
-end
-
-function purgeSidebar()
-	local targetImgRef, targetImgX, targetImgY, rawText, currentCount = findSidebarSVG()
-	if not targetImgRef then
-		return showNote("📭 No Sidebar found on this layer.")
-	end
-
-	local chunks = getChunks(rawText)
-
-	if #chunks <= 1 then
-		app.clearSelection()
-		app.addToSelection({ targetImgRef })
-		app.activateAction("delete")
-		app.refreshPage()
-		showNote("🗑️ Sidebar has been deleted.")
-		return
-	end
-
-	showPaginatedDialog("purge", chunks, 1, {
-		imgRef = targetImgRef,
-		imgX = targetImgX,
-		imgY = targetImgY,
-		currentCount = currentCount,
-	})
 end
 
 function handlePaginatedCallback(selectedIndex)
@@ -680,7 +587,10 @@ function handlePaginatedCallback(selectedIndex)
 		return
 	end
 
-	local mapEntry = sidebarContext.dialogMap[idx] or sidebarContext.dialogMap[idx + 1]
+	local mapEntry = sidebarContext.dialogMap[idx]
+	if not mapEntry then
+		mapEntry = sidebarContext.dialogMap[idx + 1]
+	end
 	if not mapEntry then
 		sidebarContext = nil
 		return
@@ -690,48 +600,159 @@ function handlePaginatedCallback(selectedIndex)
 		sidebarContext = nil
 		return
 	elseif mapEntry.type == "prev" then
-		showPaginatedDialog(sidebarContext.action, sidebarContext.chunks, sidebarContext.page - 1, sidebarContext.meta)
+		showPaginatedDialog(sidebarContext.action, sidebarContext.items, sidebarContext.page - 1)
 	elseif mapEntry.type == "next" then
-		showPaginatedDialog(sidebarContext.action, sidebarContext.chunks, sidebarContext.page + 1, sidebarContext.meta)
+		showPaginatedDialog(sidebarContext.action, sidebarContext.items, sidebarContext.page + 1)
 	elseif mapEntry.type == "item" then
+		local itemInfo = mapEntry.itemInfo
+
 		if sidebarContext.action == "recall" then
-			triggerRecallAction(mapEntry.parsed)
+			local f = io.open(itemInfo.filepath, "rb")
+			if f then
+				local fullData = f:read("*a")
+				f:close()
+				triggerRecallAction({ type = itemInfo.type, data = fullData })
+
+				updateSidebarMarker(true)
+			else
+				showNote("❌ Could not read file data.")
+			end
 			sidebarContext = nil
 		elseif sidebarContext.action == "purge" then
-			local chunks = sidebarContext.chunks
-			table.remove(chunks, mapEntry.index)
-
-			local meta = sidebarContext.meta
-			app.clearSelection()
-			app.addToSelection({ meta.imgRef })
-			app.activateAction("delete")
-
-			local combinedText = ""
-			for _, chunk in ipairs(chunks) do
-				combinedText = combinedText .. chunk .. DELIMITER
-			end
-
-			if combinedText ~= "" then
-				app.addImages({
-					images = {
-						{
-							data = generateSidebarSvg(meta.currentCount, combinedText, #chunks),
-							x = meta.imgX,
-							y = meta.imgY,
-							maxWidth = ICON_SIZE,
-							maxHeight = ICON_SIZE,
-							aspectRatio = true,
-						},
-					},
-					allowUndoRedoAction = "none",
-				})
-				app.clearSelection()
-			end
-
-			app.refreshPage()
+			os.remove(itemInfo.filepath)
 			showNote("✂️ Item deleted.")
+
+			updateSidebarMarker(false)
 			sidebarContext = nil
 		end
+	end
+end
+
+function stashSidebar()
+	local clipObj = getSmartClipboardData()
+	if not clipObj then
+		return showNote("❌ Clipboard is empty. Please copy some text or image first.")
+	end
+
+	local dir = getStorageDir()
+	if not dir then
+		return
+	end
+
+	os.execute(string.format('mkdir -p "%s"', dir))
+
+	local hash = simpleHash(clipObj.data)
+	local ext = clipObj.type == "image" and ".png" or ".md"
+	local timeStr = os.date("%Y%m%d%H%M%S")
+	local newFilename = timeStr .. "_" .. hash .. ext
+	local newFilepath = dir .. "/" .. newFilename
+
+	local checkCmd = string.format('ls "%s"/*+%s.* 2>/dev/null', dir, hash)
+	local checkF = io.popen(checkCmd, "r")
+	if checkF then
+		local res = checkF:read("*a")
+		checkF:close()
+		if res and res ~= "" then
+			return showNote("⚠️ This item is already stored. Duplicate rejected.")
+		end
+	end
+
+	local currentItems = getStoredItems() or {}
+	if #currentItems >= 30 then
+		return showNote("⚠️ Storage is full (max 30 items per page). Please delete some items first.")
+	end
+
+	local fOut = io.open(newFilepath, "wb")
+	if fOut then
+		fOut:write(clipObj.data)
+		fOut:close()
+
+		updateSidebarMarker(false)
+		showNote(clipObj.type == "image" and "✅ Image stored locally!" or "✅ Text stored locally!")
+	else
+		showNote("❌ Failed to write file to Obsidian folder.")
+	end
+end
+
+function recallSidebar()
+	local items = getStoredItems()
+	if not items then
+		return
+	end
+
+	if #items == 0 then
+		return showNote("📭 No stashed items found for this page.")
+	end
+
+	if #items > 0 then
+		updateSidebarMarker(false)
+	end
+
+	if #items == 1 then
+		local f = io.open(items[1].filepath, "rb")
+		if f then
+			local fullData = f:read("*a")
+			f:close()
+			triggerRecallAction({ type = items[1].type, data = fullData })
+			updateSidebarMarker(true)
+			return
+		end
+	end
+
+	showPaginatedDialog("recall", items, 1)
+end
+
+function purgeSidebar()
+	local items = getStoredItems()
+	if not items then
+		return
+	end
+
+	if #items == 0 then
+		return showNote("📭 Nothing to delete on this page.")
+	end
+
+	showPaginatedDialog("purge", items, 1)
+end
+
+function setStoragePath()
+	local path = getClipboardText()
+	if not path or path == "" then
+		return showNote("❌ Clipboard is empty.\n\nPlease copy a folder path first.")
+	end
+
+	local isDir = false
+	if is_mac or os_name == "unix" then
+		local ret = os.execute('test -d "' .. path .. '"')
+		isDir = (ret == 0 or ret == true)
+	else
+		local ret = os.execute('if exist "' .. path .. '\\*" (exit 0) else (exit 1)')
+		isDir = (ret == 0 or ret == true)
+	end
+
+	if not isDir then
+		if not (path:match("^/") or path:match("^[a-zA-Z]:\\")) then
+			return showNote("❌ Invalid absolute path:\n" .. path)
+		end
+	end
+
+	local text = metadata.getMetadataText()
+	local db = {}
+	if text and text ~= "" then
+		db = metadata.parseINI(text)
+	end
+
+	if not db["Sidebar"] then
+		db["Sidebar"] = {}
+	end
+	db["Sidebar"]["StoragePath"] = path
+
+	local success = metadata.writeMetadata(db)
+	if success then
+		cachedStoragePath = path
+		showNote("✅ Storage path updated to:\n" .. path)
+	else
+		showNote("❌ Failed to save path configuration.")
 	end
 end
 
@@ -739,4 +760,9 @@ function initUi()
 	app.registerUi({ ["menu"] = "Sidebar: Stash Clipboard", ["callback"] = "stashSidebar", ["accelerator"] = "<Alt>1" })
 	app.registerUi({ ["menu"] = "Sidebar: Recall & Read", ["callback"] = "recallSidebar", ["accelerator"] = "<Alt>2" })
 	app.registerUi({ ["menu"] = "Sidebar: Purge Assets", ["callback"] = "purgeSidebar", ["accelerator"] = "<Alt>3" })
+	app.registerUi({
+		["menu"] = "Sidebar: Set Storage Path",
+		["callback"] = "setStoragePath",
+		["accelerator"] = "<Alt>4",
+	})
 end
