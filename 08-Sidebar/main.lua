@@ -416,9 +416,11 @@ local function updateSidebarMarker()
 
 	local stroke_visual_thickness = MARKER_THICKNESS_FACTOR * current_marker_scale
 
+	local dynamic_pressure = 1.0 * (current_marker_scale / DEFAULT_MARKER_SCALE)
+
 	local P = {}
 	for i = 1, #X do
-		table.insert(P, 1.0)
+		table.insert(P, dynamic_pressure)
 	end
 
 	app.addStrokes({
