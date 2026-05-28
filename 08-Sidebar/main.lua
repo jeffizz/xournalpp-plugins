@@ -3,6 +3,7 @@ sidebarContext = nil
 local metadata = require("metadata")
 
 local cachedStoragePath = nil
+local cachedHtml2MarkdownPath = nil
 
 local MARKER_COLOR = 0xEF514E
 local MARKER_BASE_PRESSURE = 1.7777
@@ -78,23 +79,33 @@ local function getCenter()
 	return w / 2, h / 2
 end
 
-local function getBaseStorageDir()
-	if cachedStoragePath then
-		return cachedStoragePath
-	end
-
+local function loadConfigFromMetadata()
 	local text = metadata.getMetadataText()
 	if text and text ~= "" then
 		local db = metadata.parseINI(text)
-		if db and db["Sidebar"] and db["Sidebar"]["StoragePath"] then
-			local path = db["Sidebar"]["StoragePath"]
-			if path ~= "" then
-				cachedStoragePath = path
-				return cachedStoragePath
+		if db and db["Sidebar"] then
+			if db["Sidebar"]["StoragePath"] then
+				cachedStoragePath = db["Sidebar"]["StoragePath"]
+			end
+			if db["Sidebar"]["Html2MarkdownPath"] then
+				cachedHtml2MarkdownPath = db["Sidebar"]["Html2MarkdownPath"]
 			end
 		end
 	end
-	return nil
+end
+
+local function getBaseStorageDir()
+	if not cachedStoragePath then
+		loadConfigFromMetadata()
+	end
+	return cachedStoragePath
+end
+
+local function getHtml2MarkdownPath()
+	if not cachedHtml2MarkdownPath then
+		loadConfigFromMetadata()
+	end
+	return cachedHtml2MarkdownPath
 end
 
 local function getStorageDir()
@@ -478,6 +489,39 @@ local function getSmartClipboardData()
 		end
 	end
 
+	local html2mdPath = getHtml2MarkdownPath()
+	if html2mdPath and html2mdPath ~= "" then
+		local cmd = ""
+		if is_mac then
+			cmd = string.format(
+				"osascript -e 'the clipboard as «class HTML»' 2>/dev/null | perl -ne 'if (/«data HTML([0-9a-fA-F]+)»/i) { my $hex = $1; print chr(hex($1)) while $hex =~ /([0-9a-fA-F]{2})/g; }' | \"%s\" --plugin-table --plugin-strikethrough 2>/dev/null",
+				html2mdPath
+			)
+		else
+			cmd = string.format(
+				'xclip -selection clipboard -t text/html -o 2>/dev/null | "%s" --plugin-table --plugin-strikethrough 2>/dev/null',
+				html2mdPath
+			)
+		end
+
+		local hf = io.popen(cmd, "r")
+		if hf then
+			local mdData = hf:read("*a")
+			hf:close()
+
+			if mdData and #mdData > 0 then
+				local bom = string.char(0xEF, 0xBB, 0xBF)
+				if mdData:sub(1, 3) == bom then
+					mdData = mdData:sub(4)
+				end
+
+				if mdData:match("%S") then
+					return { type = "text", data = mdData }
+				end
+			end
+		end
+	end
+
 	local text = getClipboardText()
 	if text and text ~= "" then
 		return { type = "text", data = text }
@@ -736,19 +780,33 @@ end
 function setStoragePath()
 	local path = getClipboardText()
 	if not path or path == "" then
-		return showNote("❌ Clipboard is empty.\n\nPlease copy a folder path first.")
+		return showNote("❌ Clipboard is empty.\n\nPlease copy a path first.")
 	end
 
-	local isDir = false
+	path = path:match("^%s*(.-)%s*$"):gsub('^"', ""):gsub('"$', "")
+
+	local isHtml2Md = path:match("html2markdown") ~= nil
+
+	local isDirOrFile = false
 	if is_mac or os_name == "unix" then
-		local ret = os.execute('test -d "' .. path .. '"')
-		isDir = (ret == 0 or ret == true)
+		if isHtml2Md then
+			local ret = os.execute('test -x "' .. path .. '"')
+			isDirOrFile = (ret == 0 or ret == true)
+		else
+			local ret = os.execute('test -d "' .. path .. '"')
+			isDirOrFile = (ret == 0 or ret == true)
+		end
 	else
-		local ret = os.execute('if exist "' .. path .. '\\*" (exit 0) else (exit 1)')
-		isDir = (ret == 0 or ret == true)
+		if isHtml2Md then
+			local ret = os.execute('if exist "' .. path .. '" (exit 0) else (exit 1)')
+			isDirOrFile = (ret == 0 or ret == true)
+		else
+			local ret = os.execute('if exist "' .. path .. '\\*" (exit 0) else (exit 1)')
+			isDirOrFile = (ret == 0 or ret == true)
+		end
 	end
 
-	if not isDir then
+	if not isDirOrFile then
 		if not (path:match("^/") or path:match("^[a-zA-Z]:\\")) then
 			return showNote("❌ Invalid absolute path:\n" .. path)
 		end
@@ -763,14 +821,25 @@ function setStoragePath()
 	if not db["Sidebar"] then
 		db["Sidebar"] = {}
 	end
-	db["Sidebar"]["StoragePath"] = path
 
-	local success = metadata.writeMetadata(db)
-	if success then
-		cachedStoragePath = path
-		showNote("✅ Storage path updated to:\n" .. path)
+	if isHtml2Md then
+		db["Sidebar"]["Html2MarkdownPath"] = path
+		local success = metadata.writeMetadata(db)
+		if success then
+			cachedHtml2MarkdownPath = path
+			showNote("✅ Html2Markdown path updated to:\n" .. path)
+		else
+			showNote("❌ Failed to save html2markdown path.")
+		end
 	else
-		showNote("❌ Failed to save path configuration.")
+		db["Sidebar"]["StoragePath"] = path
+		local success = metadata.writeMetadata(db)
+		if success then
+			cachedStoragePath = path
+			showNote("✅ Storage path updated to:\n" .. path)
+		else
+			showNote("❌ Failed to save path configuration.")
+		end
 	end
 end
 
