@@ -6,7 +6,7 @@ local cachedStoragePath = nil
 local cachedHtml2MarkdownPath = nil
 
 local MARKER_COLOR = 0xEF514E
-local MARKER_BASE_PRESSURE = 1.7777
+local MARKER_THICKNESS_FACTOR = 2.123
 local DEFAULT_MARKER_SCALE = 0.5
 
 local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
@@ -225,59 +225,60 @@ local function updateSidebarMarker()
 		recall_count = 99
 	end
 
+	local currentColor = MARKER_COLOR
+
 	local strokes = app.getStrokes("page") or {}
 	for _, s in ipairs(strokes) do
 		local is_marker = false
-		local p_val = 0
 
-		if s.pressure and #s.pressure > 0 then
-			local sum = 0
-			for i = 1, #s.pressure do
-				sum = sum + s.pressure[i]
+		if s.x and #s.x > 50 then
+			local minx, maxx, miny, maxy = s.x[1], s.x[1], s.y[1], s.y[1]
+			for i = 2, #s.x do
+				if s.x[i] < minx then
+					minx = s.x[i]
+				end
+				if s.x[i] > maxx then
+					maxx = s.x[i]
+				end
+				if s.y[i] < miny then
+					miny = s.y[i]
+				end
+				if s.y[i] > maxy then
+					maxy = s.y[i]
+				end
 			end
-			p_val = sum / #s.pressure
+
+			local bb_width = maxx - minx
+			local bb_height = maxy - miny
+			local max_bb = math.max(bb_width, bb_height)
+
+			if max_bb > 10 then
+				local user_scale = max_bb / 84
+
+				local is_square = math.abs(bb_width - bb_height) < (0.05 * max_bb)
+
+				local expected_width = MARKER_THICKNESS_FACTOR * user_scale
+				local width_matches = false
+
+				if s.width and (math.abs(s.width - expected_width) < (0.05 * expected_width)) then
+					width_matches = true
+				end
+
+				local color_matches = (s.color == MARKER_COLOR) or (s.fill == 60)
+
+				if is_square and width_matches and color_matches then
+					is_marker = true
+					current_marker_scale = user_scale
+					center_x = (minx + maxx) / 2
+					center_y = (miny + maxy) / 2
+				end
+			end
 		end
 
-		local minx, maxx, miny, maxy = s.x[1], s.x[1], s.y[1], s.y[1]
-		for i = 2, #s.x do
-			if s.x[i] < minx then
-				minx = s.x[i]
-			end
-			if s.x[i] > maxx then
-				maxx = s.x[i]
-			end
-			if s.y[i] < miny then
-				miny = s.y[i]
-			end
-			if s.y[i] > maxy then
-				maxy = s.y[i]
-			end
-		end
-
-		local bb_width = maxx - minx
-		local bb_height = maxy - miny
-		local max_bb = math.max(bb_width, bb_height)
-
-		if max_bb > 10 and #s.x > 50 then
-			local user_scale = max_bb / 84
-			if p_val >= (MARKER_BASE_PRESSURE - 0.002) and p_val <= (MARKER_BASE_PRESSURE + 0.010) then
-				is_marker = true
-			elseif
-				(p_val / user_scale) >= (MARKER_BASE_PRESSURE - 0.002)
-				and (p_val / user_scale) <= (MARKER_BASE_PRESSURE + 0.010)
-			then
-				is_marker = true
-			elseif s.color == MARKER_COLOR then
-				is_marker = true
-			end
-
-			if is_marker then
-				table.insert(refsToDelete, s.ref)
-				center_x = (minx + maxx) / 2
-				center_y = (miny + maxy) / 2
-
-				current_marker_scale = user_scale
-			end
+		if is_marker then
+			table.insert(refsToDelete, s.ref)
+			currentColor = s.color
+			break
 		end
 	end
 
@@ -292,19 +293,16 @@ local function updateSidebarMarker()
 		return
 	end
 
-	local target_pressure = MARKER_BASE_PRESSURE * current_marker_scale
-
 	local cx, cy = center_x, center_y
 	if not cx or not cy then
 		cx, cy = getCenter()
 	end
 
-	local X, Y, P = {}, {}, {}
+	local X, Y, P = {}, {}
 
 	local function p(x, y)
 		table.insert(X, x)
 		table.insert(Y, y)
-		table.insert(P, target_pressure)
 	end
 
 	local function retrace(from_idx)
@@ -416,8 +414,12 @@ local function updateSidebarMarker()
 	arc(cx, cy, R, 90, 0, 16)
 	arc(cx, cy, R, 0, -90, 16)
 
-	local stroke_visual_thickness = 2.0 * current_marker_scale
-	local stroke_width_param = stroke_visual_thickness / target_pressure
+	local stroke_visual_thickness = MARKER_THICKNESS_FACTOR * current_marker_scale
+
+	local P = {}
+	for i = 1, #X do
+		table.insert(P, 1.0)
+	end
 
 	app.addStrokes({
 		strokes = {
@@ -426,8 +428,8 @@ local function updateSidebarMarker()
 				y = Y,
 				pressure = P,
 				tool = "pen",
-				width = stroke_width_param,
-				color = MARKER_COLOR,
+				width = stroke_visual_thickness,
+				color = currentColor,
 				fill = 60,
 				lineStyle = "solid",
 			},
