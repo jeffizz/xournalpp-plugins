@@ -253,20 +253,18 @@ local function updateSidebarMarker()
 			local max_bb = math.max(bb_width, bb_height)
 
 			if max_bb > 10 then
-				local user_scale = max_bb / 84
-
-				local is_square = math.abs(bb_width - bb_height) < (0.05 * max_bb)
+				local user_scale = max_bb / 84 -- it equals 0.5 without scaling by user
 
 				local expected_width = MARKER_THICKNESS_FACTOR * user_scale
 				local width_matches = false
 
-				if s.width and (math.abs(s.width - expected_width) < (0.05 * expected_width)) then
+				if s.width and (math.abs(s.width - expected_width) < (0.01 * expected_width)) then
 					width_matches = true
 				end
 
-				local color_matches = (s.color == MARKER_COLOR) or (s.fill == 67)
+				local color_matches = (s.color == MARKER_COLOR) and (s.fill == 67)
 
-				if is_square and width_matches and color_matches then
+				if width_matches or color_matches then
 					is_marker = true
 					current_marker_scale = user_scale
 					center_x = (minx + maxx) / 2
