@@ -18,7 +18,7 @@ local metadataCache = {
 pendingJumpContext = nil
 pendingJumpTargets = nil
 
-local ITEMS_PER_PAGE = 8
+local ITEMS_PER_PAGE = 6
 
 local function getTmpDir()
 	local dir = os.getenv("TMPDIR") or os.getenv("TEMP") or os.getenv("TMP") or "/tmp"
@@ -218,6 +218,62 @@ function getByteCount(byte)
 	return 1
 end
 
+function previewPdfPage(targetInternal)
+	local doc = app.getDocumentStructure()
+	if not doc or not doc.pages or not doc.pages[targetInternal] then
+		return
+	end
+
+	local pdfBgNo = doc.pages[targetInternal].pdfBackgroundPageNo
+	local pdfPath = doc.pdfBackgroundFilename
+
+	if not pdfPath or pdfPath == "" or not pdfBgNo or pdfBgNo <= 0 then
+		showNote("❌ Invalid PDF background or page for preview.")
+		return
+	end
+
+	local db = fetchMetadata()
+	local mutoolExec = (db["Common"] and db["Common"]["MutoolPath"]) or "mutool"
+	local os_name = package.config:sub(1, 1) == "\\" and "win" or "unix"
+
+	local tmpImg = getTmpDir() .. "/xo_preview.png"
+	local safePath = '"' .. pdfPath:gsub('"', '\\"') .. '"'
+	local nullDev = os_name == "win" and "nul" or "/dev/null"
+
+	-- 150 dpi
+	local cmdDraw = string.format('"%s" draw -r 150 -o "%s" %s %d 2>%s', mutoolExec, tmpImg, safePath, pdfBgNo, nullDev)
+	os.execute(cmdDraw)
+
+	if os_name == "unix" then
+		local f = io.popen("uname -s", "r")
+		local uname = f and f:read("*a") or ""
+		if f then
+			f:close()
+		end
+
+		if uname:match("Darwin") then
+			local cmdCopy = string.format(
+				"osascript -e 'set the clipboard to (read (POSIX file \"%s\") as «class PNGf»)'",
+				tmpImg
+			)
+			os.execute(cmdCopy)
+			os.execute('open "raycast://extensions/codiy/clipboard-preview/clipboard-preview"')
+		else
+			os.execute(
+				string.format(
+					"xclip -selection clipboard -t image/png -i '%s' 2>/dev/null || wl-copy < '%s'",
+					tmpImg,
+					tmpImg
+				)
+			)
+			os.execute('xdg-open "raycast://extensions/codiy/clipboard-preview/clipboard-preview" 2>/dev/null')
+		end
+	else
+		os.execute(string.format("powershell -command \"Set-Clipboard -Path '%s'\"", tmpImg))
+		os.execute('start "raycast://extensions/codiy/clipboard-preview/clipboard-preview"')
+	end
+end
+
 function renderJumpDialog()
 	if not pendingJumpContext then
 		return
@@ -233,6 +289,14 @@ function renderJumpDialog()
 
 	local dialogOptions = {}
 	local dialogTargets = {}
+
+	pendingJumpContext.actionMode = pendingJumpContext.actionMode or "jump"
+	if pendingJumpContext.actionMode == "jump" then
+		table.insert(dialogOptions, "🚀")
+	else
+		table.insert(dialogOptions, "👁️")
+	end
+	table.insert(dialogTargets, "toggle_mode")
 
 	local message = ""
 	local prefix = (pendingJumpContext.mode == "search") and "🔍 Search Results"
@@ -285,7 +349,11 @@ function handleJumpDialogResult(selectedIndex)
 
 	local target = pendingJumpTargets[idx] or pendingJumpTargets[idx + 1]
 
-	if target == "next" then
+	if target == "toggle_mode" then
+		pendingJumpContext.actionMode = (pendingJumpContext.actionMode == "jump") and "preview" or "jump"
+		renderJumpDialog()
+		return
+	elseif target == "next" then
 		pendingJumpContext.dialogPage = pendingJumpContext.dialogPage + 1
 		renderJumpDialog()
 		return
@@ -298,13 +366,17 @@ function handleJumpDialogResult(selectedIndex)
 		pendingJumpTargets = nil
 		return
 	elseif target then
-		local key = getFileKey()
-		if not teleportStations[key] then
-			teleportStations[key] = { a = 0, b = 0 }
+		if pendingJumpContext.actionMode == "preview" then
+			previewPdfPage(target)
+		else
+			local key = getFileKey()
+			if not teleportStations[key] then
+				teleportStations[key] = { a = 0, b = 0 }
+			end
+			teleportStations[key].a = pendingJumpContext.origin
+			teleportStations[key].b = target
+			scrollToPage(target)
 		end
-		teleportStations[key].a = pendingJumpContext.origin
-		teleportStations[key].b = target
-		scrollToPage(target)
 	end
 
 	pendingJumpContext = nil
