@@ -264,7 +264,7 @@ local function updateSidebarMarker()
 					width_matches = true
 				end
 
-				local color_matches = (s.color == MARKER_COLOR) or (s.fill == 60)
+				local color_matches = (s.color == MARKER_COLOR) or (s.fill == 67)
 
 				if is_square and width_matches and color_matches then
 					is_marker = true
@@ -430,7 +430,7 @@ local function updateSidebarMarker()
 				tool = "pen",
 				width = stroke_visual_thickness,
 				color = currentColor,
-				fill = 60,
+				fill = 67,
 				lineStyle = "solid",
 			},
 		},
