@@ -1045,6 +1045,7 @@ function handleOutlineDialogResult(selectedIndex)
 				teleportStations[key] = { a = 0, b = 0 }
 			end
 			teleportStations[key].a = app.getDocumentStructure().currentPage
+			teleportStations[key].b = selectedNode.targetPage
 			scrollToPage(selectedNode.targetPage)
 			pendingJumpContext = nil
 		else
