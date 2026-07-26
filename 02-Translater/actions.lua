@@ -50,7 +50,7 @@ end
 function actions.selectDictApp()
 	app.openDialog(
 		"Please select your preferred dictionary app:",
-		{ "Eudic", "Easydict", "Cancel" },
+		{ "Eudic", "Eudic-FR", "Easydict", "Cancel" },
 		"onDictDialogResult"
 	)
 end
@@ -63,7 +63,7 @@ function actions.onDictDialogResult(selectedIndex)
 
 	local selection = nil
 	if type(selectedIndex) == "number" then
-		local opts = { "eudic", "easydict", "cancel" }
+		local opts = { "eudic", "eudic-fr", "easydict", "cancel" }
 		selection = opts[selectedIndex] or opts[selectedIndex + 1]
 	else
 		selection = string.lower(tostring(selectedIndex))
@@ -107,6 +107,12 @@ function actions.doTranslate(text, dictApp)
 	if dictApp == "eudic" then
 		if string.match(text, "^[a-zA-Z%-]+$") then
 			os.execute("open 'eudic://dict/" .. text .. "'")
+		else
+			callRaycast("tech-translate-only", text)
+		end
+	elseif dictApp == "eudic-fr" then
+		if string.match(text, "^[a-zA-ZÀ-ÿ%-]+$") then
+			os.execute("open 'eudic-fr://dict/" .. text .. "'")
 		else
 			callRaycast("tech-translate-only", text)
 		end
